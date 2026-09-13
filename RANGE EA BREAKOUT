@@ -186,6 +186,18 @@ input color                  BentoShadow = C'8,10,22';
 input color                  BentoInk = C'198,208,238';
 input color                  BentoTurquoise = C'54,226,208';
 input color                  BentoCoral = C'255,113,116';
+//---- vivid header colours, one per section
+input color                  SecAccountColor  = C'0,170,255';   // equity
+input color                  SecRangeColor    = C'0,215,170';   // range break
+input color                  SecFilterColor   = C'255,70,160';  // filters
+input color                  SecThemeColor    = C'150,90,255';  // theme
+input color                  SecCandleColor   = C'255,175,0';   // countdown
+input color                  SecObjectiveColor= C'0,200,120';   // objectives
+input color                  SecExecColor     = C'255,95,80';   // execution
+input color                  SecPerfColor     = C'0,170,255';   // performance
+input color                  SecTableColor    = C'150,90,255';  // daily table
+input color                  SecPeriodColor   = C'255,175,0';   // by period
+input color                  SecCurveColor    = C'0,215,170';   // equity curve
 
 //---- Range zone rendering (solid cyan slab, raised, behind the candles)
 input bool                   RangeZoneRaised3D = true;       // bevel edges
@@ -4299,17 +4311,44 @@ string BentoThemeName()
 }
 
 //--- one rounded-look tile: shadow, body, soft top highlight ---------
+// Solid raised tile: drop shadow, solid body, bright top bevel and dark
+// bottom bevel so the surface reads as lifted off the panel.
 void BentoCard(const string key, const int x, const int y,
                const int w, const int h, const color accent)
 {
    string b = g_objectPrefix + "BN_" + key;
-   SetScreenRectangle(b + "_SH", x + 2, y + 3, w, h,
+   SetScreenRectangle(b + "_SH", x + 3, y + 4, w, h,
                       BentoShadow, BentoShadow, 0);
    SetScreenRectangle(b + "_BG", x, y, w, h,
-                      BentoTile, BlendColor(accent, BentoTile, 0.30), 1);
-   SetScreenRectangle(b + "_HL", x + 1, y + 1, w - 2, 1,
-                      BlendColor(clrWhite, BentoTile, 0.14),
-                      BlendColor(clrWhite, BentoTile, 0.14), 2);
+                      BentoTile, BlendColor(accent, BentoTile, 0.45), 1);
+   SetScreenRectangle(b + "_HL", x + 1, y + 1, w - 2, 2,
+                      BrightenColor(BentoTile, 0.40),
+                      BrightenColor(BentoTile, 0.40), 2);
+   SetScreenRectangle(b + "_LO", x + 1, y + h - 2, w - 2, 2,
+                      BrightenColor(BentoTile, -0.45),
+                      BrightenColor(BentoTile, -0.45), 2);
+   SetScreenRectangle(b + "_LT", x + 1, y + 1, 2, h - 2,
+                      BrightenColor(BentoTile, 0.22),
+                      BrightenColor(BentoTile, 0.22), 2);
+}
+
+// Raised tile carrying a solid vivid header band across the top.
+void BentoCardHead(const string key, const int x, const int y,
+                   const int w, const int h, const color header,
+                   const string title, const int headH)
+{
+   string b = g_objectPrefix + "BN_" + key;
+   BentoCard(key, x, y, w, h, header);
+   SetScreenRectangle(b + "_HD", x + 2, y + 2, w - 4, headH,
+                      header, header, 3);
+   SetScreenRectangle(b + "_HDHL", x + 2, y + 2, w - 4, 1,
+                      BrightenColor(header, 0.55),
+                      BrightenColor(header, 0.55), 4);
+   SetScreenRectangle(b + "_HDLO", x + 2, y + 2 + headH - 1, w - 4, 1,
+                      BrightenColor(header, -0.45),
+                      BrightenColor(header, -0.45), 4);
+   SetCardLabel(b + "_HDT", x + 12, y + 2 + (headH - 13) / 2,
+                title, clrWhite, 9, true);
 }
 
 void BentoLabel(const string key, const int x, const int y,
@@ -4331,18 +4370,30 @@ void BentoBar(const string key, const int x, const int y, const int w,
    int fill = (int)(w * p / 100.0);
    if(fill < 2 && p > 0.0) fill = 2;
 
+   // sunken track
    SetScreenRectangle(b + "_TR", x, y, w, h,
-                      BlendColor(clrBlack, BentoTile, 0.45),
-                      BlendColor(clrBlack, BentoTile, 0.45), 3);
+                      BrightenColor(BentoTile, -0.55),
+                      BrightenColor(BentoTile, -0.30), 3);
+   SetScreenRectangle(b + "_TRS", x, y, w, 1,
+                      BrightenColor(BentoTile, -0.70),
+                      BrightenColor(BentoTile, -0.70), 4);
    if(fill > 0)
    {
-      SetScreenRectangle(b + "_FL", x, y, fill, h, accent, accent, 4);
-      SetScreenRectangle(b + "_GL", x, y, fill, 1,
-                         BlendColor(clrWhite, accent, 0.45),
-                         BlendColor(clrWhite, accent, 0.45), 5);
+      // solid raised fill
+      SetScreenRectangle(b + "_FL", x, y, fill, h, accent, accent, 5);
+      SetScreenRectangle(b + "_GL", x, y, fill, 2,
+                         BrightenColor(accent, 0.50),
+                         BrightenColor(accent, 0.50), 6);
+      SetScreenRectangle(b + "_SD", x, y + h - 2, fill, 2,
+                         BrightenColor(accent, -0.40),
+                         BrightenColor(accent, -0.40), 6);
    }
    else
+   {
       DeleteObjectIfExists(b + "_FL");
+      DeleteObjectIfExists(b + "_GL");
+      DeleteObjectIfExists(b + "_SD");
+   }
    if(caption != "")
       BentoLabel(key + "_CP", x + 6, y + (h - 11) / 2, caption,
                  BentoInk, 7, true);
@@ -4360,12 +4411,15 @@ void BentoVBar(const string key, const int x, const int baseY,
    int hh = (int)(maxH * r);
    if(hh < 2) hh = 2;
    SetScreenRectangle(b + "_TR", x, baseY - maxH, w, maxH,
-                      BlendColor(clrBlack, BentoTile, 0.40),
-                      BlendColor(clrBlack, BentoTile, 0.40), 3);
+                      BrightenColor(BentoTile, -0.50),
+                      BrightenColor(BentoTile, -0.25), 3);
    SetScreenRectangle(b + "_BR", x, baseY - hh, w, hh, accent, accent, 4);
    SetScreenRectangle(b + "_CAP", x, baseY - hh, w, 2,
-                      BlendColor(clrWhite, accent, 0.50),
-                      BlendColor(clrWhite, accent, 0.50), 5);
+                      BrightenColor(accent, 0.55),
+                      BrightenColor(accent, 0.55), 5);
+   SetScreenRectangle(b + "_EDG", x + w - 2, baseY - hh, 2, hh,
+                      BrightenColor(accent, -0.40),
+                      BrightenColor(accent, -0.40), 5);
 }
 
 void BentoButton(const string key, const int x, const int y,
@@ -4422,15 +4476,15 @@ void DrawBentoMainPanel()
 
    // outer container
    SetScreenRectangle(g_objectPrefix + "BN_SHELL_SH", x + 3, y + 4,
-                      W + 12, 556, BentoShadow, BentoShadow, 0);
+                      W + 12, 606, BentoShadow, BentoShadow, 0);
    SetScreenRectangle(g_objectPrefix + "BN_SHELL", x - 6, y - 6,
-                      W + 12, 556, BentoShell,
+                      W + 12, 606, BentoShell,
                       BlendColor(accA, BentoShell, 0.35), 0);
 
    g_panelLeftX1 = x - 6;
    g_panelLeftY1 = y - 6;
    g_panelLeftX2 = x - 6 + W + 12;
-   g_panelLeftY2 = y - 6 + 556;
+   g_panelLeftY2 = y - 6 + 606;
 
    double floating = FloatingEAProfit();
    double equity = AccountEquity();
@@ -4439,47 +4493,44 @@ void DrawBentoMainPanel()
 
    //--- TILE A : equity, wide -----------------------------------------
    int ty = y;
-   BentoCard("A", x, ty, W, 92, accA);
-   BentoLabel("A_L", x + 14, ty + 10, "ACCOUNT EQUITY", BentoInk, 10, true);
-   BentoLabel("A_V", x + 14, ty + 30, DoubleToString(equity, 2) + " "
-              + AccountCurrency(), accA, 20, true);
-   BentoLabel("A_S", x + 14, ty + 64,
+   BentoCardHead("A", x, ty, W, 100, SecAccountColor, "ACCOUNT EQUITY", 22);
+   BentoLabel("A_V", x + 14, ty + 34, DoubleToString(equity, 2) + " "
+              + AccountCurrency(), BrightenColor(SecAccountColor, 0.45), 20, true);
+   BentoLabel("A_S", x + 14, ty + 70,
               "BAL " + DoubleToString(balance, 2)
               + "   FLOAT " + SignedNumber(floating, 2)
               + "   " + SignedNumber(gainPct, 2) + "%",
               floating >= 0.0 ? accA : accB, 9, true);
-   BentoLabel("A_SPR", x + W - 118, ty + 10,
+   BentoLabel("A_SPR", x + W - 118, ty + 6,
               "SPREAD " + DoubleToString((Ask - Bid) / Point, 0),
-              BentoInk, 9, true);
+              clrWhite, 9, true);
 
    //--- TILE B : range break (left) / TILE C : filters (right) --------
-   ty = y + 100;
+   ty = y + 108;
    int halfW = (W - 10) / 2;
-   BentoCard("B", x, ty, halfW, 124, accA);
-   BentoLabel("B_L", x + 12, ty + 9, "RANGE BREAK", BentoInk, 10, true);
-   BentoLabel("B_V", x + 12, ty + 29,
+   BentoCardHead("B", x, ty, halfW, 132, SecRangeColor, "RANGE BREAK", 20);
+   BentoLabel("B_V", x + 12, ty + 30,
               g_rangeActive ? "ACTIVE" : "WAITING",
               g_rangeActive ? accA : BentoInk, 15, true);
    if(g_rangeActive)
    {
-      BentoLabel("B_T", x + 12, ty + 57,
+      BentoLabel("B_T", x + 12, ty + 62,
                  "TOP  " + DoubleToString(g_rangeTop, Digits), accA, 9, true);
-      BentoLabel("B_B", x + 12, ty + 76,
+      BentoLabel("B_B", x + 12, ty + 84,
                  "LOW  " + DoubleToString(g_rangeBottom, Digits), accB, 9, true);
-      BentoLabel("B_S", x + 12, ty + 95,
+      BentoLabel("B_S", x + 12, ty + 106,
                  "SPAN " + DoubleToString((g_rangeTop - g_rangeBottom) / Point, 0)
                  + " pts", BentoInk, 9, true);
    }
    else
    {
-      BentoLabel("B_T", x + 12, ty + 57, "no active range", BentoInk, 9, true);
-      BentoLabel("B_B", x + 12, ty + 76, ShortText(g_status, 20), BentoInk, 8, false);
-      BentoLabel("B_S", x + 12, ty + 95, "", BentoInk, 9, false);
+      BentoLabel("B_T", x + 12, ty + 62, "no active range", BentoInk, 9, true);
+      BentoLabel("B_B", x + 12, ty + 84, ShortText(g_status, 20), BentoInk, 8, false);
+      BentoLabel("B_S", x + 12, ty + 106, "", BentoInk, 9, false);
    }
 
    int cx = x + halfW + 10;
-   BentoCard("C", cx, ty, halfW, 124, accB);
-   BentoLabel("C_L", cx + 12, ty + 9, "FILTERS", BentoInk, 10, true);
+   BentoCardHead("C", cx, ty, halfW, 132, SecFilterColor, "FILTERS", 20);
 
    double spread = (Ask - Bid) / Point;
    string fName[4];  bool fState[4];
@@ -4491,7 +4542,7 @@ void DrawBentoMainPanel()
 
    for(int f = 0; f < 4; f++)
    {
-      int fy = ty + 32 + f * 22;
+      int fy = ty + 32 + f * 23;
       color sc = fState[f] ? accA : accB;
       SetScreenRectangle(g_objectPrefix + "BN_C_SW" + IntegerToString(f),
                          cx + 12, fy + 3, 26, 12, sc, sc, 4);
@@ -4503,26 +4554,24 @@ void DrawBentoMainPanel()
    }
 
    //--- TILE D : theme  /  TILE E : candle countdown ------------------
-   ty = y + 232;
+   ty = y + 248;
    int themeW = 122;
-   BentoCard("D", x, ty, themeW, 64, accB);
-   BentoLabel("D_L", x + 12, ty + 8, "THEME", BentoInk, 9, true);
-   BentoButton("THEME", x + 10, ty + 26, themeW - 20, 28,
-               BentoThemeName(), accB);
+   BentoCardHead("D", x, ty, themeW, 70, SecThemeColor, "THEME", 20);
+   BentoButton("THEME", x + 10, ty + 30, themeW - 20, 30,
+               BentoThemeName(), SecThemeColor);
 
    int cdX = x + themeW + 10;
    int cdW = W - themeW - 10;
-   BentoCard("E", cdX, ty, cdW, 64, accA);
+   BentoCardHead("E", cdX, ty, cdW, 70, SecCandleColor, "NEXT CANDLE", 20);
    double frac = 0.0;
    string cd = BentoCandleCountdown(frac);
-   BentoLabel("E_L", cdX + 12, ty + 8, "NEXT CANDLE", BentoInk, 9, true);
-   BentoLabel("E_V", cdX + cdW - 82, ty + 5, cd, accA, 17, true);
-   BentoBar("E_BAR", cdX + 12, ty + 38, cdW - 24, 16, frac * 100.0, accA, "");
+   BentoLabel("E_V", cdX + cdW - 84, ty + 4, cd, clrWhite, 13, true);
+   BentoBar("E_BAR", cdX + 12, ty + 42, cdW - 24, 18, frac * 100.0,
+            SecCandleColor, "");
 
    //--- TILE F : objectives -------------------------------------------
-   ty = y + 304;
-   BentoCard("F", x, ty, W, 136, accA);
-   BentoLabel("F_L", x + 14, ty + 9, "OBJECTIVES", BentoInk, 10, true);
+   ty = y + 326;
+   BentoCardHead("F", x, ty, W, 148, SecObjectiveColor, "OBJECTIVES", 22);
 
    double lossUsed = 0.0;
    if(MaximumDailyLossPercent > 0.0 && g_dailyNetResult < 0.0)
@@ -4539,35 +4588,35 @@ void DrawBentoMainPanel()
    double wr = OutcomeRate(wn, tw);
 
    // label row, then bar row: nothing shares a line, so nothing overlaps
-   BentoLabel("F_L1", x + 14, ty + 31, "DAILY LOSS BUDGET", BentoInk, 9, true);
-   BentoLabel("F_P1", x + W - 66, ty + 31,
-              DoubleToString(lossUsed, 0) + "%", accB, 9, true);
-   BentoBar("F_B1", x + 14, ty + 47, W - 28, 14, lossUsed, accB, "");
+   BentoLabel("F_L1", x + 14, ty + 32, "DAILY LOSS BUDGET", BentoInk, 9, true);
+   BentoLabel("F_P1", x + W - 66, ty + 32,
+              DoubleToString(lossUsed, 0) + "%", SecExecColor, 9, true);
+   BentoBar("F_B1", x + 14, ty + 48, W - 28, 16, lossUsed, SecExecColor, "");
 
-   BentoLabel("F_L2", x + 14, ty + 67, "POSITION SLOTS", BentoInk, 9, true);
-   BentoLabel("F_P2", x + W - 66, ty + 67,
+   BentoLabel("F_L2", x + 14, ty + 74, "POSITION SLOTS", BentoInk, 9, true);
+   BentoLabel("F_P2", x + W - 66, ty + 74,
               IntegerToString(openNow) + " / "
-              + IntegerToString(MaxOpenPositions), accA, 9, true);
-   BentoBar("F_B2", x + 14, ty + 83, W - 28, 14, slotPct, accA, "");
+              + IntegerToString(MaxOpenPositions), SecAccountColor, 9, true);
+   BentoBar("F_B2", x + 14, ty + 90, W - 28, 16, slotPct, SecAccountColor, "");
 
-   BentoLabel("F_L3", x + 14, ty + 103, "WIN RATE", BentoInk, 9, true);
-   BentoLabel("F_P3", x + W - 66, ty + 103,
-              DoubleToString(wr, 1) + "%", accA, 9, true);
-   BentoBar("F_B3", x + 14, ty + 119, W - 28, 14, wr, accA, "");
+   BentoLabel("F_L3", x + 14, ty + 116, "WIN RATE", BentoInk, 9, true);
+   BentoLabel("F_P3", x + W - 66, ty + 116,
+              DoubleToString(wr, 1) + "%", SecObjectiveColor, 9, true);
+   BentoBar("F_B3", x + 14, ty + 132, W - 28, 16, wr, SecObjectiveColor, "");
 
    //--- TILE G : execution + pause ------------------------------------
-   ty = y + 448;
-   BentoCard("G", x, ty, W, 96, accB);
-   BentoLabel("G_L", x + 14, ty + 9,
+   ty = y + 486;
+   BentoCardHead("G", x, ty, W, 104, SecExecColor, "EXECUTION", 20);
+   BentoLabel("G_L", x + 14, ty + 26,
               Symbol() + " / " + TimeframeText(Period())
               + "    LOT " + (LotSizingMode == LOT_FIXED
                               ? DoubleToString(FixedLots, LotDigits())
                               : "AUTO")
               + "    R:R " + DoubleToString(RiskRewardRatio, 2),
               BentoInk, 9, true);
-   BentoLabel("G_S", x + 14, ty + 29, ShortText(g_status, 44),
+   BentoLabel("G_S", x + 14, ty + 44, ShortText(g_status, 44),
               BentoInk, 8, false);
-   BentoButton("PAUSE", x + 12, ty + 52, W - 24, 32,
+   BentoButton("PAUSE", x + 12, ty + 64, W - 24, 32,
                g_entriesPaused ? "ENTRIES PAUSED - CLICK TO RESUME"
                                : "PAUSE NEW ENTRIES",
                g_entriesPaused ? accB : accA);
@@ -4704,9 +4753,9 @@ void DrawBentoPerformancePanel()
       if(dayTrades[q] > 0 && rows < maxRows) rows++;
 
    int headH = 38;
-   int tableH = 34 + rows * rowH + 12;
+   int tableH = 52 + rows * rowH + 12;
    int barsH = 252;
-   int curveTileH = 170;
+   int curveTileH = 196;
    int shellH = headH + tableH + barsH + curveTileH + 38;
 
    SetScreenRectangle(g_objectPrefix + "BP_SHELL_SH", x + 3, y + 4,
@@ -4721,16 +4770,16 @@ void DrawBentoPerformancePanel()
    g_panelRightY2 = y - 6 + shellH;
 
    //--- header tile ----------------------------------------------------
-   BentoPerfTile("H", x, y, W, headH, accA);
-   BentoPerfLabel("H_T", x + 14, y + 10, "PERFORMANCE", BentoInk, 11, true);
-   BentoPerfLabel("H_S", x + W - 150, y + 12,
+   BentoPerfTileHead("H", x, y, W, headH, SecPerfColor, "PERFORMANCE", 26);
+   BentoPerfLabel("H_S", x + W - 150, y + 8,
                   (TrackerAllSymbolsWithMagic ? "ALL SYMBOLS" : Symbol())
-                  + "   " + IntegerToString(days) + "D", accA, 9, true);
+                  + "   " + IntegerToString(days) + "D", clrWhite, 9, true);
 
    //--- daily table tile ------------------------------------------------
    int ty = y + headH + 8;
-   BentoPerfTile("T", x, ty, W, tableH, accA);
-   BentoPerfMonoBold("T_H", x + 12, ty + 9,
+   BentoPerfTileHead("T", x, ty, W, tableH, SecTableColor,
+                     "DAILY RESULTS", 22);
+   BentoPerfMonoBold("T_H", x + 12, ty + 28,
                   PadRight("DATE", 12) + PadLeft("LOT", 6)
                   + PadLeft("PROFIT", 11) + PadLeft("GAIN%", 9)
                   + PadLeft("TRD", 5) + PadLeft("W/L", 7)
@@ -4766,14 +4815,14 @@ void DrawBentoPerformancePanel()
       color rc = dayProfit[d2] > 0.0 ? accA
                  : (dayProfit[d2] < 0.0 ? accB : BentoInk);
       BentoPerfMono("ROW" + IntegerToString(slot), x + 12,
-                    ty + 34 + slot * rowH, row, rc, 9);
+                    ty + 52 + slot * rowH, row, rc, 9);
       slot++;
    }
 
    //--- profit by period : richer per-period statistics ------------------
    int by = ty + tableH + 8;
-   BentoPerfTile("G", x, by, W, barsH, accB);
-   BentoPerfLabel("G_L", x + 14, by + 9, "PROFIT BY PERIOD", BentoInk, 11, true);
+   BentoPerfTileHead("G", x, by, W, barsH, SecPeriodColor,
+                     "PROFIT BY PERIOD", 22);
 
    double vals[4] = {0.0, 0.0, 0.0, 0.0};
    string names[4] = {"DAILY", "WEEKLY", "MONTHLY", "TOTAL"};
@@ -4788,14 +4837,14 @@ void DrawBentoPerformancePanel()
    if(peak <= 0.0) peak = 1.0;
 
    // Column header so every number below is self-describing.
-   BentoPerfMonoBold("G_H", x + 14, by + 30,
+   BentoPerfMonoBold("G_H", x + 14, by + 32,
                      PadRight("PERIOD", 10) + PadLeft("NET", 10)
                      + PadLeft("TRD", 5) + PadLeft("WIN%", 7)
                      + PadLeft("PF", 7) + PadLeft("BEST", 9)
                      + PadLeft("WORST", 9) + PadLeft("LOTS", 7),
-                     BlendColor(accB, BentoInk, 0.55), 8);
+                     BrightenColor(SecPeriodColor, 0.50), 8);
 
-   int rowY0 = by + 48;
+   int rowY0 = by + 50;
    int prH = 17;
    for(int b2 = 0; b2 < 4; b2++)
    {
@@ -4849,9 +4898,9 @@ void DrawBentoPerformancePanel()
 
    //--- EQUITY CURVE (tester style) --------------------------------------
    int cy = by + barsH + 8;
-   int curveH = 170;
-   BentoPerfTile("Q", x, cy, W, curveH, accA);
-   BentoPerfLabel("Q_L", x + 14, cy + 9, "EQUITY CURVE", BentoInk, 11, true);
+   int curveH = 196;
+   BentoPerfTileHead("Q", x, cy, W, curveH, SecCurveColor,
+                     "EQUITY CURVE", 22);
 
    BentoDrawEquityCurve(x, cy, W, curveH, eqTime, eqProfit, eqCount,
                         accA, accB);
@@ -4881,31 +4930,45 @@ void BentoDrawEquityCurve(const int x, const int y, const int W,
                           double &profits[], const int count,
                           const color accA, const color accB)
 {
-   int plotL = x + 52;
-   int plotR = x + W - 14;
-   int plotT = y + 32;
-   int plotB = y + H - 30;
+   int plotL = x + 54;
+   int plotR = x + W - 16;
+   int plotT = y + 40;
+   int plotB = y + H - 34;
    int plotW = plotR - plotL;
    int plotH = plotB - plotT;
 
-   for(int stale = 0; stale < 160; stale++)
-      DeleteObjectIfExists(g_objectPrefix + "BP_EQ" + IntegerToString(stale));
-
-   if(count < 1 || plotW < 20 || plotH < 20)
+   for(int stale = 0; stale < 200; stale++)
    {
-      BentoPerfLabel("Q_E", x + 14, y + H / 2 - 8,
+      DeleteObjectIfExists(g_objectPrefix + "BP_EQS" + IntegerToString(stale));
+      DeleteObjectIfExists(g_objectPrefix + "BP_EQF" + IntegerToString(stale));
+   }
+   for(int gl = 0; gl < 12; gl++)
+   {
+      DeleteObjectIfExists(g_objectPrefix + "BP_EQGH" + IntegerToString(gl));
+      DeleteObjectIfExists(g_objectPrefix + "BP_EQGV" + IntegerToString(gl));
+      DeleteObjectIfExists(g_objectPrefix + "BP_EQAX" + IntegerToString(gl));
+   }
+
+   if(count < 1 || plotW < 30 || plotH < 20)
+   {
+      BentoPerfLabel("Q_E", x + 16, y + H / 2 - 8,
                      "no closed trades yet", BentoInk, 9, false);
       return;
    }
    DeleteObjectIfExists(g_objectPrefix + "BP_Q_E");
 
-   // History is walked newest-first, so reverse into chronological order
-   // and build the running equity after every trade.
+   // Running balance, oldest first.
    double curve[];
    ArrayResize(curve, count + 1);
    ArrayInitialize(curve, 0.0);
-   curve[0] = 0.0;
-   double run = 0.0;
+   double startBalance = AccountBalance();
+   double totalNet = 0.0;
+   for(int t = 0; t < count; t++) totalNet += profits[t];
+   startBalance -= totalNet;
+   if(startBalance <= 0.0) startBalance = 1.0;
+
+   curve[0] = startBalance;
+   double run = startBalance;
    for(int i = count - 1; i >= 0; i--)
    {
       run += profits[i];
@@ -4913,101 +4976,156 @@ void BentoDrawEquityCurve(const int x, const int y, const int W,
    }
 
    int pts = count + 1;
-   double lo = 0.0, hi = 0.0;
+   double lo = curve[0], hi = curve[0];
    for(int k = 0; k < pts; k++)
    {
       if(curve[k] < lo) lo = curve[k];
       if(curve[k] > hi) hi = curve[k];
    }
    double span = hi - lo;
-   if(span <= 0.0) span = 1.0;
-   double padSpan = span * 0.12;
-   lo -= padSpan;
-   hi += padSpan;
+   if(span <= 0.0) span = MathMax(hi * 0.02, 1.0);
+   lo -= span * 0.12;
+   hi += span * 0.12;
    span = hi - lo;
 
-   int zeroY = plotB - (int)((0.0 - lo) / span * plotH);
-
-   // plot frame + zero baseline
+   // ---- sunken plot well ------------------------------------------
    SetScreenRectangle(g_objectPrefix + "BP_EQFRAME", plotL, plotT,
                       plotW, plotH,
-                      BlendColor(clrBlack, BentoTile, 0.35),
-                      BlendColor(accA, BentoTile, 0.30), 2);
-   SetScreenRectangle(g_objectPrefix + "BP_EQZERO", plotL, zeroY,
-                      plotW, 1, BlendColor(BentoInk, BentoTile, 0.55),
-                      BlendColor(BentoInk, BentoTile, 0.55), 4);
+                      BrightenColor(BentoTile, -0.55),
+                      BrightenColor(SecCurveColor, -0.30), 2);
+   SetScreenRectangle(g_objectPrefix + "BP_EQFSH", plotL, plotT,
+                      plotW, 1, BrightenColor(BentoTile, -0.75),
+                      BrightenColor(BentoTile, -0.75), 3);
 
-   // axis labels
-   BentoPerfLabel("Q_HI", x + 10, plotT - 6,
-                  SignedNumber(hi, 0), BentoInk, 7, false);
-   BentoPerfLabel("Q_ZE", x + 10, zeroY - 7, "0", BentoInk, 7, false);
-   BentoPerfLabel("Q_LO", x + 10, plotB - 8,
-                  SignedNumber(lo, 0), BentoInk, 7, false);
-
-   // The curve is rendered as vertical columns from the zero line to the
-   // equity value: no line primitive is needed and it reads like the
-   // tester's filled graph.
-   int cols = plotW;
-   if(cols > 150) cols = 150;
-   int colW = plotW / cols;
-   if(colW < 1) colW = 1;
-   cols = plotW / colW;
-
-   double peakSoFar = 0.0;
-   for(int c = 0; c < cols; c++)
+   // ---- dotted grid, tester style ----------------------------------
+   color gridColor = BrightenColor(BentoTile, 0.22);
+   for(int g = 1; g < 4; g++)
    {
-      int idx = (int)((double)c / MathMax(cols - 1, 1) * (pts - 1));
-      if(idx < 0) idx = 0;
-      if(idx > pts - 1) idx = pts - 1;
-      double val = curve[idx];
-      if(val > peakSoFar) peakSoFar = val;
-
-      int vy = plotB - (int)((val - lo) / span * plotH);
-      int top = vy < zeroY ? vy : zeroY;
-      int hgt = MathAbs(zeroY - vy);
-      if(hgt < 1) hgt = 1;
-
-      // drawdown from the running peak is shaded with the loss colour
-      bool under = (val < peakSoFar - 1e-8);
-      color colColor = val >= 0.0
-                       ? (under ? BlendColor(accA, BentoTile, 0.55) : accA)
-                       : accB;
-
-      SetScreenRectangle(g_objectPrefix + "BP_EQ" + IntegerToString(c),
-                         plotL + c * colW, top, colW, hgt,
-                         colColor, colColor, 5);
+      int gy = plotT + (int)(plotH * g / 4.0);
+      SetScreenRectangle(g_objectPrefix + "BP_EQGH" + IntegerToString(g),
+                         plotL + 1, gy, plotW - 2, 1,
+                         gridColor, gridColor, 4);
+      double gv = hi - (hi - lo) * g / 4.0;
+      BentoPerfLabel("EQAXL" + IntegerToString(g), x + 10, gy - 7,
+                     DoubleToString(gv, 0), BentoInk, 7, false);
+   }
+   for(int gx2 = 1; gx2 < 8; gx2++)
+   {
+      int gxp = plotL + (int)(plotW * gx2 / 8.0);
+      SetScreenRectangle(g_objectPrefix + "BP_EQGV" + IntegerToString(gx2),
+                         gxp, plotT + 1, 1, plotH - 2,
+                         gridColor, gridColor, 4);
    }
 
-   // final equity marker
+   BentoPerfLabel("Q_HI", x + 10, plotT - 7,
+                  DoubleToString(hi, 0), BentoInk, 7, false);
+   BentoPerfLabel("Q_LO", x + 10, plotB - 7,
+                  DoubleToString(lo, 0), BentoInk, 7, false);
+
+   // ---- the curve itself: a genuine polyline -----------------------
+   // Screen-pixel trend lines are not available, so each segment is an
+   // OBJ_RECTANGLE_LABEL one or two pixels thick stepped between the
+   // two sample points. With one segment per pixel column the result
+   // reads as a continuous smooth line, exactly like the tester graph.
+   int segs = plotW;
+   if(segs > 190) segs = 190;
+   if(segs < 2) segs = 2;
+
+   int prevX = plotL;
+   int prevY = plotB - (int)((curve[0] - lo) / span * plotH);
+   int seg = 0;
+
+   for(int c = 1; c <= segs; c++)
+   {
+      double frac = (double)c / segs;
+      int idx = (int)MathRound(frac * (pts - 1));
+      if(idx < 0) idx = 0;
+      if(idx > pts - 1) idx = pts - 1;
+
+      int cxp = plotL + (int)(plotW * frac);
+      int cyp = plotB - (int)((curve[idx] - lo) / span * plotH);
+
+      // vertical connector so the line never breaks between columns
+      int vTop = cyp < prevY ? cyp : prevY;
+      int vH = MathAbs(cyp - prevY);
+      if(vH > 0 && seg < 200)
+      {
+         SetScreenRectangle(g_objectPrefix + "BP_EQS" + IntegerToString(seg),
+                            prevX, vTop, 2, vH,
+                            SecCurveColor, SecCurveColor, 8);
+         seg++;
+      }
+      // horizontal run to this column
+      int hW = cxp - prevX;
+      if(hW > 0 && seg < 200)
+      {
+         SetScreenRectangle(g_objectPrefix + "BP_EQS" + IntegerToString(seg),
+                            prevX, cyp, hW + 1, 2,
+                            SecCurveColor, SecCurveColor, 8);
+         seg++;
+      }
+
+      prevX = cxp;
+      prevY = cyp;
+   }
+
+   // ---- end marker and stats ---------------------------------------
+   SetScreenRectangle(g_objectPrefix + "BP_EQDOT", prevX - 3, prevY - 3,
+                      7, 7, BrightenColor(SecCurveColor, 0.45),
+                      clrWhite, 9);
+
    double finalEq = curve[pts - 1];
-   double maxDD = 0.0;
-   double peakRun = 0.0;
+   double maxDD = 0.0, peakRun = curve[0];
    for(int d = 0; d < pts; d++)
    {
       if(curve[d] > peakRun) peakRun = curve[d];
       double dd = peakRun - curve[d];
       if(dd > maxDD) maxDD = dd;
    }
+   double ddPct = peakRun > 0.0 ? maxDD / peakRun * 100.0 : 0.0;
 
-   BentoPerfLabel("Q_F", x + 14, y + H - 22,
-                  "FINAL " + SignedNumber(finalEq, 2)
-                  + "    PEAK " + SignedNumber(hi - padSpan, 2)
+   BentoPerfLabel("Q_F", x + 16, y + H - 24,
+                  "START " + DoubleToString(startBalance, 2)
+                  + "    FINAL " + DoubleToString(finalEq, 2)
                   + "    MAX DD " + DoubleToString(maxDD, 2)
+                  + " (" + DoubleToString(ddPct, 1) + "%)"
                   + "    " + IntegerToString(count) + " TRADES",
-                  finalEq >= 0.0 ? accA : accB, 8, true);
+                  finalEq >= startBalance ? accA : accB, 8, true);
 }
 
 void BentoPerfTile(const string key, const int x, const int y,
                    const int w, const int h, const color accent)
 {
    string b = g_objectPrefix + "BP_" + key;
-   SetScreenRectangle(b + "_SH", x + 2, y + 3, w, h,
+   SetScreenRectangle(b + "_SH", x + 3, y + 4, w, h,
                       BentoShadow, BentoShadow, 0);
    SetScreenRectangle(b + "_BG", x, y, w, h, BentoTile,
-                      BlendColor(accent, BentoTile, 0.30), 1);
-   SetScreenRectangle(b + "_HL", x + 1, y + 1, w - 2, 1,
-                      BlendColor(clrWhite, BentoTile, 0.14),
-                      BlendColor(clrWhite, BentoTile, 0.14), 2);
+                      BlendColor(accent, BentoTile, 0.45), 1);
+   SetScreenRectangle(b + "_HL", x + 1, y + 1, w - 2, 2,
+                      BrightenColor(BentoTile, 0.40),
+                      BrightenColor(BentoTile, 0.40), 2);
+   SetScreenRectangle(b + "_LO", x + 1, y + h - 2, w - 2, 2,
+                      BrightenColor(BentoTile, -0.45),
+                      BrightenColor(BentoTile, -0.45), 2);
+}
+
+// Raised performance tile with a solid vivid header band.
+void BentoPerfTileHead(const string key, const int x, const int y,
+                       const int w, const int h, const color header,
+                       const string title, const int headH)
+{
+   string b = g_objectPrefix + "BP_" + key;
+   BentoPerfTile(key, x, y, w, h, header);
+   SetScreenRectangle(b + "_HD", x + 2, y + 2, w - 4, headH,
+                      header, header, 3);
+   SetScreenRectangle(b + "_HDHL", x + 2, y + 2, w - 4, 1,
+                      BrightenColor(header, 0.55),
+                      BrightenColor(header, 0.55), 4);
+   SetScreenRectangle(b + "_HDLO", x + 2, y + 2 + headH - 1, w - 4, 1,
+                      BrightenColor(header, -0.45),
+                      BrightenColor(header, -0.45), 4);
+   SetCardLabel(b + "_HDT", x + 12, y + 2 + (headH - 14) / 2,
+                title, clrWhite, 10, true);
 }
 
 void BentoPerfLabel(const string key, const int x, const int y,
@@ -5044,12 +5162,15 @@ void BentoPerfVBar(const string key, const int x, const int baseY,
    int hh = (int)(maxH * r);
    if(hh < 2) hh = 2;
    SetScreenRectangle(b + "_TR", x, baseY - maxH, w, maxH,
-                      BlendColor(clrBlack, BentoTile, 0.40),
-                      BlendColor(clrBlack, BentoTile, 0.40), 3);
+                      BrightenColor(BentoTile, -0.50),
+                      BrightenColor(BentoTile, -0.25), 3);
    SetScreenRectangle(b + "_BR", x, baseY - hh, w, hh, accent, accent, 4);
    SetScreenRectangle(b + "_CAP", x, baseY - hh, w, 2,
-                      BlendColor(clrWhite, accent, 0.50),
-                      BlendColor(clrWhite, accent, 0.50), 5);
+                      BrightenColor(accent, 0.55),
+                      BrightenColor(accent, 0.55), 5);
+   SetScreenRectangle(b + "_EDG", x + w - 2, baseY - hh, 2, hh,
+                      BrightenColor(accent, -0.40),
+                      BrightenColor(accent, -0.40), 5);
 }
 
 //+------------------------------------------------------------------+
