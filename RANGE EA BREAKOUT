@@ -151,9 +151,13 @@ input bool                   ApplyProfessionalChartTheme = true;
 input ENUM_RBS_PANEL_STYLE   PanelStyle = PANEL_NEON_COMMAND;
 input bool                   RememberPanelStyleSelection = true;
 input bool                   ShowClosedTradeResultCards = true;
-input int                    ClosedTradeCardWidth = 150;
-input int                    ClosedTradeCardHeight = 42;
-input int                    ClosedTradeCardOffsetY = 12;
+input int                    ClosedTradeCardWidth = 150;  // legacy, unused
+input int                    ClosedTradeCardHeight = 42;  // legacy, unused
+input int                    ClosedTradeCardOffsetY = 12; // legacy, unused
+input int                    ResultCardGapPixels = 10;    // gap under range box
+input int                    ResultCardFontSize = 9;
+input double                 ResultCardCharWidthPx = 0.62; // width per pt of font
+input int                    ResultCardPadPixels = 10;
 input int                    DashboardX = 12;
 input int                    DashboardY = 20;
 input bool                   ShowProfitTracker = true;
@@ -245,6 +249,13 @@ bool     g_qualityPassed = false;
 bool     g_entriesPaused = false; // session-local; exits and trailing remain active
 int      g_dashboardTab = 0;
 int      g_bentoTheme = 0;   // 0 aqua, 1 amber, 2 mint
+//--- rolling log of drawn range boxes: lets a result card be anchored
+//--- under the range box that was live when its trade closed.
+datetime g_rangeLogFrom[];
+datetime g_rangeLogTo[];
+double   g_rangeLogBottom[];
+int      g_rangeLogCount = 0;
+bool     g_forceVisualRefresh = false;
 
 //---- Active selectable panel style
 color    g_styleMainHeader = C'0,140,255';
@@ -354,10 +365,10 @@ int OnInit()
       return(INIT_PARAMETERS_INCORRECT);
    }
    if(ShowClosedTradeResultCards &&
-      (ClosedTradeCardWidth < 110 || ClosedTradeCardWidth > 260 ||
-       ClosedTradeCardHeight < 34 || ClosedTradeCardHeight > 80))
+      (ResultCardFontSize < 6 || ResultCardFontSize > 16 ||
+       ResultCardGapPixels < 0 || ResultCardGapPixels > 200))
    {
-      Print("RBS EA: trade-result card width must be 110-260 and height 34-80.");
+      Print("RBS EA: result card font must be 6-16 and gap 0-200 pixels.");
       return(INIT_PARAMETERS_INCORRECT);
    }
    if(EnableTrailingStop &&
@@ -487,6 +498,9 @@ void OnChartEvent(const int id,
 
    if(id == CHARTEVENT_CHART_CHANGE)
    {
+      // Scrolling or zooming changes the pixel scale, so the result
+      // cards must be rebuilt at the new geometry.
+      g_forceVisualRefresh = true;
       g_lastTrackerHistoryCount = -1;
       g_lastResultCardHistoryCount = -1;
       g_lastDashboardUpdate = 0;
@@ -2593,6 +2607,8 @@ void DrawRangeZone(const string baseName,
       baseName == "" || top <= bottom)
       return;
 
+   LogRangeBox(leftTime, rightTime, bottom);
+
    double middle = (top + bottom) * 0.5;
    double height = top - bottom;
 
@@ -2880,8 +2896,10 @@ void UpdateStatusDisplay()
 
    datetime updateTime = TimeCurrent();
    if(updateTime == g_lastDashboardUpdate &&
-      g_status == g_lastDashboardStatus)
+      g_status == g_lastDashboardStatus &&
+      !g_forceVisualRefresh)
       return;
+   g_forceVisualRefresh = false;
    g_lastDashboardUpdate = updateTime;
    g_lastDashboardStatus = g_status;
 
@@ -3312,49 +3330,94 @@ void DrawLastTradeStrip(const int x,
       DeleteObjectIfExists(g_objectPrefix + "LAST_BOX_" + IntegerToString(j));
 }
 
+void LogRangeBox(const datetime from, const datetime to,
+                 const double bottom)
+{
+   // Replace the entry that shares this start time, otherwise append.
+   for(int i = 0; i < g_rangeLogCount; i++)
+   {
+      if(g_rangeLogFrom[i] == from)
+      {
+         g_rangeLogTo[i] = to;
+         g_rangeLogBottom[i] = bottom;
+         return;
+      }
+   }
+   int n = g_rangeLogCount + 1;
+   ArrayResize(g_rangeLogFrom, n);
+   ArrayResize(g_rangeLogTo, n);
+   ArrayResize(g_rangeLogBottom, n);
+   g_rangeLogFrom[n - 1] = from;
+   g_rangeLogTo[n - 1] = to;
+   g_rangeLogBottom[n - 1] = bottom;
+   g_rangeLogCount = n;
+
+   // Keep the log bounded.
+   if(g_rangeLogCount > 400)
+   {
+      for(int k = 0; k < g_rangeLogCount - 1; k++)
+      {
+         g_rangeLogFrom[k] = g_rangeLogFrom[k + 1];
+         g_rangeLogTo[k] = g_rangeLogTo[k + 1];
+         g_rangeLogBottom[k] = g_rangeLogBottom[k + 1];
+      }
+      g_rangeLogCount--;
+      ArrayResize(g_rangeLogFrom, g_rangeLogCount);
+      ArrayResize(g_rangeLogTo, g_rangeLogCount);
+      ArrayResize(g_rangeLogBottom, g_rangeLogCount);
+   }
+}
+
+// Bottom of the range box that was active when the trade closed.
+// Returns false when no logged range covers that moment.
+bool RangeBottomAt(const datetime when, double &bottomOut)
+{
+   bool found = false;
+   datetime best = 0;
+   for(int i = 0; i < g_rangeLogCount; i++)
+   {
+      if(when >= g_rangeLogFrom[i] && g_rangeLogFrom[i] >= best)
+      {
+         // prefer the most recent range that started at or before 'when'
+         best = g_rangeLogFrom[i];
+         bottomOut = g_rangeLogBottom[i];
+         found = true;
+      }
+   }
+   return(found);
+}
+
+//+------------------------------------------------------------------+
+//| Closed-trade result cards.                                       |
+//| Anchored to chart time/price (OBJ_RECTANGLE_LABEL cannot scroll, |
+//| so these are built from OBJ_RECTANGLE + OBJ_TEXT), sized to the  |
+//| text they contain, and parked ResultCardGapPixels under the      |
+//| bottom edge of the range box they belong to.                     |
+//+------------------------------------------------------------------+
 void DrawClosedTradeResultCards()
 {
-   int historyCount = OrdersHistoryTotal();
-   if(historyCount == g_lastResultCardHistoryCount)
-      return;
-   g_lastResultCardHistoryCount = historyCount;
-
    string cardPrefix = g_objectPrefix + "TRADE_CARD_";
    DeleteObjectsWithPrefix(cardPrefix);
 
-   long chartWidth = 0;
-   long chartHeight = 0;
-   ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0, chartWidth);
-   ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0, chartHeight);
-   if(chartWidth < 300 || chartHeight < 180)
-   {
-      g_lastResultCardHistoryCount = -1;
-      return;
-   }
-
-   int cardWidth = ClosedTradeCardWidth;
-   int cardHeight = ClosedTradeCardHeight;
-   int leftLimit = 6;
-   if(ShowEAStatus)
-      leftLimit = DashboardX + 400 + 10;
-   int rightLimit = (int)chartWidth - 6;
-   if(ShowProfitTracker)
-   {
-      int trackerMargin = ProfitTrackerRightMargin;
-      if(trackerMargin < 5) trackerMargin = 5;
-      if(trackerMargin > 160) trackerMargin = 160;
-      rightLimit = (int)chartWidth - trackerMargin - 395 - 10;
-   }
-   if(rightLimit - leftLimit < cardWidth)
+   if(!VisualOutputAvailable())
       return;
 
-   int usedX[];
-   int usedY[];
-   int drawn = 0;
+   int font = ResultCardFontSize;
+   if(font < 6) font = 6;
+   if(font > 16) font = 16;
+   int pad = ResultCardPadPixels;
+   if(pad < 2) pad = 2;
+   int gap = ResultCardGapPixels;
 
-   // Draw every matching closed trade whose close point is currently visible
-   // in the center chart area. Scrolling/zooming triggers a complete redraw.
-   for(int i = historyCount - 1; i >= 0; i--)
+   // Pixel -> price/time scale for the current view.
+   double pxPerPrice = 0.0;
+   int pxPerBar = 0;
+   if(!ChartPixelScale(pxPerPrice, pxPerBar) || pxPerPrice <= 0.0)
+      return;
+
+   int barSeconds = PeriodSeconds(_Period);
+
+   for(int i = OrdersHistoryTotal() - 1; i >= 0; i--)
    {
       if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY))
          continue;
@@ -3364,59 +3427,6 @@ void DrawClosedTradeResultCards()
          continue;
       if(OrderCloseTime() <= 0)
          continue;
-
-      int anchorX = 0;
-      int anchorY = 0;
-      if(!ChartTimePriceToXY(0, 0, OrderCloseTime(), OrderClosePrice(),
-                             anchorX, anchorY))
-         continue;
-      if(anchorX < leftLimit || anchorX > rightLimit ||
-         anchorY < 0 || anchorY >= (int)chartHeight)
-         continue;
-
-      int cardX = anchorX - cardWidth / 2;
-      if(cardX < leftLimit) cardX = leftLimit;
-      if(cardX + cardWidth > rightLimit) cardX = rightLimit - cardWidth;
-      int baseY = anchorY + ClosedTradeCardOffsetY;
-      if(baseY + cardHeight > (int)chartHeight - 5)
-         baseY = anchorY - cardHeight - ClosedTradeCardOffsetY;
-      if(baseY < 5) baseY = 5;
-
-      int cardY = baseY;
-      bool placed = false;
-      for(int attempt = 0; attempt < 14; attempt++)
-      {
-         if(attempt > 0)
-         {
-            int level = (attempt + 1) / 2;
-            int direction = (attempt % 2 == 1) ? 1 : -1;
-            cardY = baseY + direction * level * (cardHeight + 5);
-            if(cardY < 5) cardY = 5;
-            if(cardY + cardHeight > (int)chartHeight - 5)
-               cardY = (int)chartHeight - cardHeight - 5;
-         }
-
-         bool overlap = false;
-         for(int r = 0; r < drawn; r++)
-         {
-            if(cardX < usedX[r] + cardWidth + 4 &&
-               cardX + cardWidth + 4 > usedX[r] &&
-               cardY < usedY[r] + cardHeight + 4 &&
-               cardY + cardHeight + 4 > usedY[r])
-            {
-               overlap = true;
-               break;
-            }
-         }
-         if(!overlap)
-         {
-            placed = true;
-            break;
-         }
-      }
-      // When a very crowded chart has no free slot, retain the card at its
-      // close-point position rather than hiding a requested trade result.
-      if(!placed) cardY = baseY;
 
       double netResult = OrderProfit() + OrderSwap() + OrderCommission();
       double pointResult = OrderType() == OP_BUY
@@ -3430,36 +3440,110 @@ void DrawClosedTradeResultCards()
                       + DoubleToString(OrderLots(), LotDigits()) + "  "
                       + (roundedPoints > 0 ? "+" : "")
                       + IntegerToString(roundedPoints) + " pts";
+
+      // --- width fitted to the widest line -------------------------
+      int titleChars = StringLen(title);
+      int detailChars = StringLen(detail);
+      int widest = titleChars > detailChars ? titleChars : detailChars;
+      double charPx = font * ResultCardCharWidthPx;
+      int textPx = (int)MathCeil(widest * charPx);
+      int cardPx = textPx + pad * 2;
+      int rowPx = font + 6;
+      int cardPxH = rowPx * 2 + pad * 2;
+
+      // --- anchor: bottom of the owning range box ------------------
+      double boxBottom = 0.0;
+      double topPrice;
+      if(RangeBottomAt(OrderCloseTime(), boxBottom))
+         topPrice = boxBottom - gap / pxPerPrice;
+      else
+      {
+         double lowRef = OrderClosePrice();
+         topPrice = lowRef - gap / pxPerPrice;
+      }
+      double bottomPrice = topPrice - cardPxH / pxPerPrice;
+
+      datetime leftTime = OrderCloseTime();
+      datetime rightTime = (datetime)(leftTime
+                             + (long)MathCeil((double)cardPx
+                               / MathMax(pxPerBar, 1)) * barSeconds);
+
       color cardColor = netResult >= 0.0
                         ? g_styleWinCard : g_styleLossCard;
       string base = cardPrefix + IntegerToString(OrderTicket());
 
-      SetScreenRectangle(base + "_SHADOW", cardX + 4, cardY + 5,
-                         cardWidth, cardHeight,
-                         BlendColor(clrBlack, g_styleBody, 0.88),
-                         BlendColor(clrBlack, g_styleBody, 0.88), 6);
-      SetScreenRectangle(base + "_BODY", cardX, cardY,
-                         cardWidth, cardHeight,
-                         BlendColor(cardColor, g_styleBody, 0.72),
-                         BlendColor(clrWhite, cardColor, 0.38), 7);
-      SetScreenRectangle(base + "_HEAD", cardX + 2, cardY + 2,
-                         cardWidth - 4, 21,
-                         cardColor, cardColor, 8);
-      SetScreenRectangle(base + "_DOT", anchorX - 2, anchorY - 2,
-                         5, 5, cardColor, clrWhite, 9);
-      SetCardLabel(base + "_TITLE", cardX + 8, cardY + 4,
-                   title, clrWhite, 10, true);
-      SetCardLabel(base + "_DETAIL", cardX + 8, cardY + 26,
-                   detail, clrWhite, 7, true);
-      ObjectSetInteger(0, base + "_TITLE", OBJPROP_ZORDER, 10);
-      ObjectSetInteger(0, base + "_DETAIL", OBJPROP_ZORDER, 10);
+      double headBottom = topPrice - (rowPx + pad * 0.5) / pxPerPrice;
 
-      ArrayResize(usedX, drawn + 1);
-      ArrayResize(usedY, drawn + 1);
-      usedX[drawn] = cardX;
-      usedY[drawn] = cardY;
-      drawn++;
+      SetPriceRectangle(base + "_BODY", leftTime, topPrice,
+                        rightTime, bottomPrice,
+                        BlendColor(cardColor, g_styleBody, 0.80), false);
+      SetPriceRectangle(base + "_HEAD", leftTime, topPrice,
+                        rightTime, headBottom, cardColor, false);
+
+      double titleY = topPrice - (rowPx * 0.5 + pad * 0.35) / pxPerPrice;
+      double detailY = topPrice - (rowPx * 1.5 + pad * 0.8) / pxPerPrice;
+
+      SetPriceTextLeft(base + "_TITLE", leftTime, titleY, title,
+                       clrWhite, font, true, pad);
+      SetPriceTextLeft(base + "_DETAIL", leftTime, detailY, detail,
+                       clrWhite, font, false, pad);
+
+      // leader dot at the actual close point
+      SetArrowObject(base + "_DOT", OrderCloseTime(), OrderClosePrice(),
+                     159, cardColor, 1);
    }
+}
+
+// Pixels per price unit and pixels per bar for the current view.
+bool ChartPixelScale(double &pixelsPerPrice, int &pixelsPerBar)
+{
+   pixelsPerPrice = 0.0;
+   pixelsPerBar = 0;
+
+   double priceMin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
+   double priceMax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
+   long heightPx = 0;
+   if(!ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0, heightPx))
+      return(false);
+   if(priceMax <= priceMin || heightPx <= 0)
+      return(false);
+
+   pixelsPerPrice = (double)heightPx / (priceMax - priceMin);
+
+   long scale = 0;
+   ChartGetInteger(0, CHART_SCALE, 0, scale);
+   int table[6] = {1, 2, 4, 8, 16, 32};
+   int idx = (int)scale;
+   if(idx < 0) idx = 0;
+   if(idx > 5) idx = 5;
+   pixelsPerBar = table[idx];
+   return(true);
+}
+
+// Left-anchored chart text, nudged in by a pixel padding.
+void SetPriceTextLeft(const string name,
+                      const datetime anchorTime,
+                      const double anchorPrice,
+                      const string text,
+                      const color textColor,
+                      const int fontSize,
+                      const bool bold,
+                      const int padPixels)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_TEXT, 0, anchorTime, anchorPrice);
+   ObjectMove(0, name, 0, anchorTime, anchorPrice);
+   ObjectSetString(0, name, OBJPROP_TEXT, " " + text);
+   ObjectSetString(0, name, OBJPROP_FONT,
+                   bold ? g_styleBoldFont : g_styleFont);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 30);
 }
 
 void DrawProfitTrackerCard()
