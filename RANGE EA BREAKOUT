@@ -395,6 +395,10 @@ int OnInit()
       DeleteObjectsWithPrefix(g_objectPrefix + "MAIN_");
       DeleteObjectsWithPrefix(g_objectPrefix + "ANALYSIS_ROW_");
       DeleteObjectsWithPrefix(g_objectPrefix + "STYLE_");
+      // Panel geometry changed between builds: clear old tiles so none
+      // survive at stale coordinates.
+      DeleteObjectsWithPrefix(g_objectPrefix + "BN_");
+      DeleteObjectsWithPrefix(g_objectPrefix + "BP_");
    }
    if(ApplyProfessionalChartTheme)
       ApplyProChartTheme();
@@ -4179,15 +4183,15 @@ void DrawBentoMainPanel()
 {
    int x = DashboardX;
    int y = DashboardY;
-   int W = 344;
+   int W = 396;
    color accA = BentoAccentA();
    color accB = BentoAccentB();
 
    // outer container
    SetScreenRectangle(g_objectPrefix + "BN_SHELL_SH", x + 3, y + 4,
-                      W + 12, 452, BentoShadow, BentoShadow, 0);
+                      W + 12, 556, BentoShadow, BentoShadow, 0);
    SetScreenRectangle(g_objectPrefix + "BN_SHELL", x - 6, y - 6,
-                      W + 12, 452, BentoShell,
+                      W + 12, 556, BentoShell,
                       BlendColor(accA, BentoShell, 0.35), 0);
 
    double floating = FloatingEAProfit();
@@ -4197,136 +4201,135 @@ void DrawBentoMainPanel()
 
    //--- TILE A : equity, wide -----------------------------------------
    int ty = y;
-   BentoCard("A", x, ty, W, 74, accA);
-   BentoLabel("A_L", x + 14, ty + 9, "ACCOUNT EQUITY", BentoInk, 8, false);
-   BentoLabel("A_V", x + 14, ty + 24, DoubleToString(equity, 2) + " "
-              + AccountCurrency(), accA, 17, true);
-   BentoLabel("A_S", x + 14, ty + 52,
+   BentoCard("A", x, ty, W, 92, accA);
+   BentoLabel("A_L", x + 14, ty + 10, "ACCOUNT EQUITY", BentoInk, 10, true);
+   BentoLabel("A_V", x + 14, ty + 30, DoubleToString(equity, 2) + " "
+              + AccountCurrency(), accA, 20, true);
+   BentoLabel("A_S", x + 14, ty + 64,
               "BAL " + DoubleToString(balance, 2)
               + "   FLOAT " + SignedNumber(floating, 2)
               + "   " + SignedNumber(gainPct, 2) + "%",
-              floating >= 0.0 ? accA : accB, 7, false);
-   BentoLabel("A_SPR", x + W - 92, ty + 9,
+              floating >= 0.0 ? accA : accB, 9, true);
+   BentoLabel("A_SPR", x + W - 118, ty + 10,
               "SPREAD " + DoubleToString((Ask - Bid) / Point, 0),
-              BentoInk, 7, true);
+              BentoInk, 9, true);
 
-   //--- TILE B : range break (left square) ----------------------------
-   ty = y + 82;
-   int halfW = (W - 8) / 2;
-   BentoCard("B", x, ty, halfW, 96, accA);
-   BentoLabel("B_L", x + 12, ty + 8, "RANGE BREAK", BentoInk, 8, false);
-   BentoLabel("B_V", x + 12, ty + 24,
+   //--- TILE B : range break (left) / TILE C : filters (right) --------
+   ty = y + 100;
+   int halfW = (W - 10) / 2;
+   BentoCard("B", x, ty, halfW, 124, accA);
+   BentoLabel("B_L", x + 12, ty + 9, "RANGE BREAK", BentoInk, 10, true);
+   BentoLabel("B_V", x + 12, ty + 29,
               g_rangeActive ? "ACTIVE" : "WAITING",
-              g_rangeActive ? accA : BentoInk, 13, true);
+              g_rangeActive ? accA : BentoInk, 15, true);
    if(g_rangeActive)
    {
-      BentoLabel("B_T", x + 12, ty + 46,
-                 "TOP  " + DoubleToString(g_rangeTop, Digits), accA, 7, false);
-      BentoLabel("B_B", x + 12, ty + 58,
-                 "LOW  " + DoubleToString(g_rangeBottom, Digits), accB, 7, false);
-      double span = (g_rangeTop - g_rangeBottom) / Point;
-      BentoLabel("B_S", x + 12, ty + 70,
-                 "SPAN " + DoubleToString(span, 0) + " pts", BentoInk, 7, false);
+      BentoLabel("B_T", x + 12, ty + 57,
+                 "TOP  " + DoubleToString(g_rangeTop, Digits), accA, 9, true);
+      BentoLabel("B_B", x + 12, ty + 76,
+                 "LOW  " + DoubleToString(g_rangeBottom, Digits), accB, 9, true);
+      BentoLabel("B_S", x + 12, ty + 95,
+                 "SPAN " + DoubleToString((g_rangeTop - g_rangeBottom) / Point, 0)
+                 + " pts", BentoInk, 9, true);
    }
    else
    {
-      BentoLabel("B_T", x + 12, ty + 46, "no active range", BentoInk, 7, false);
-      BentoLabel("B_B", x + 12, ty + 58, "", BentoInk, 7, false);
-      BentoLabel("B_S", x + 12, ty + 70, ShortText(g_status, 24), BentoInk, 7, false);
+      BentoLabel("B_T", x + 12, ty + 57, "no active range", BentoInk, 9, true);
+      BentoLabel("B_B", x + 12, ty + 76, ShortText(g_status, 20), BentoInk, 8, false);
+      BentoLabel("B_S", x + 12, ty + 95, "", BentoInk, 9, false);
    }
 
-   //--- TILE C : filters (right, tall) --------------------------------
-   int cx = x + halfW + 8;
-   BentoCard("C", cx, ty, halfW, 96, accB);
-   BentoLabel("C_L", cx + 12, ty + 8, "FILTERS", BentoInk, 8, false);
+   int cx = x + halfW + 10;
+   BentoCard("C", cx, ty, halfW, 124, accB);
+   BentoLabel("C_L", cx + 12, ty + 9, "FILTERS", BentoInk, 10, true);
 
    double spread = (Ask - Bid) / Point;
-   bool fSpread = (MaximumSpreadPoints <= 0 || spread <= MaximumSpreadPoints);
-   bool fDaily = !g_dailyLossBlocked;
-   bool fPerm = IsTradeAllowed() && !g_entriesPaused;
-   bool fSession = InEntrySession();
-
    string fName[4];  bool fState[4];
-   fName[0] = "SPREAD";  fState[0] = fSpread;
-   fName[1] = "DAY LOSS"; fState[1] = fDaily;
-   fName[2] = "SESSION";  fState[2] = fSession;
-   fName[3] = "EXECUTION"; fState[3] = fPerm;
+   fName[0] = "SPREAD";    fState[0] = (MaximumSpreadPoints <= 0
+                                        || spread <= MaximumSpreadPoints);
+   fName[1] = "DAY LOSS";  fState[1] = !g_dailyLossBlocked;
+   fName[2] = "SESSION";   fState[2] = InEntrySession();
+   fName[3] = "EXECUTION"; fState[3] = IsTradeAllowed() && !g_entriesPaused;
 
    for(int f = 0; f < 4; f++)
    {
-      int fy = ty + 26 + f * 17;
+      int fy = ty + 32 + f * 22;
       color sc = fState[f] ? accA : accB;
       SetScreenRectangle(g_objectPrefix + "BN_C_SW" + IntegerToString(f),
-                         cx + 12, fy + 2, 22, 10, sc, sc, 4);
+                         cx + 12, fy + 3, 26, 12, sc, sc, 4);
       SetScreenRectangle(g_objectPrefix + "BN_C_KN" + IntegerToString(f),
-                         fState[f] ? cx + 24 : cx + 13, fy + 3, 9, 8,
+                         fState[f] ? cx + 26 : cx + 13, fy + 4, 11, 10,
                          clrWhite, clrWhite, 5);
-      BentoLabel("C_N" + IntegerToString(f), cx + 42, fy,
-                 fName[f], fState[f] ? BentoInk : accB, 7, false);
+      BentoLabel("C_N" + IntegerToString(f), cx + 46, fy,
+                 fName[f], fState[f] ? BentoInk : accB, 9, true);
    }
 
-   //--- TILE D : theme switch (small) + countdown (wide) --------------
-   ty = y + 186;
-   int themeW = 104;
-   BentoCard("D", x, ty, themeW, 52, accB);
-   BentoLabel("D_L", x + 12, ty + 7, "THEME", BentoInk, 7, false);
-   BentoButton("THEME", x + 10, ty + 21, themeW - 20, 22,
+   //--- TILE D : theme  /  TILE E : candle countdown ------------------
+   ty = y + 232;
+   int themeW = 122;
+   BentoCard("D", x, ty, themeW, 64, accB);
+   BentoLabel("D_L", x + 12, ty + 8, "THEME", BentoInk, 9, true);
+   BentoButton("THEME", x + 10, ty + 26, themeW - 20, 28,
                BentoThemeName(), accB);
 
-   int cdX = x + themeW + 8;
-   int cdW = W - themeW - 8;
-   BentoCard("E", cdX, ty, cdW, 52, accA);
+   int cdX = x + themeW + 10;
+   int cdW = W - themeW - 10;
+   BentoCard("E", cdX, ty, cdW, 64, accA);
    double frac = 0.0;
    string cd = BentoCandleCountdown(frac);
-   BentoLabel("E_L", cdX + 12, ty + 7, "NEXT CANDLE", BentoInk, 7, false);
-   BentoLabel("E_V", cdX + cdW - 62, ty + 4, cd, accA, 14, true);
-   BentoBar("E_BAR", cdX + 12, ty + 30, cdW - 24, 12,
-            frac * 100.0, accA, "");
+   BentoLabel("E_L", cdX + 12, ty + 8, "NEXT CANDLE", BentoInk, 9, true);
+   BentoLabel("E_V", cdX + cdW - 82, ty + 5, cd, accA, 17, true);
+   BentoBar("E_BAR", cdX + 12, ty + 38, cdW - 24, 16, frac * 100.0, accA, "");
 
-   //--- TILE F : objectives / progress bars ---------------------------
-   ty = y + 246;
-   BentoCard("F", x, ty, W, 104, accA);
-   BentoLabel("F_L", x + 14, ty + 8, "OBJECTIVES", BentoInk, 8, false);
+   //--- TILE F : objectives -------------------------------------------
+   ty = y + 304;
+   BentoCard("F", x, ty, W, 136, accA);
+   BentoLabel("F_L", x + 14, ty + 9, "OBJECTIVES", BentoInk, 10, true);
 
    double lossUsed = 0.0;
    if(MaximumDailyLossPercent > 0.0 && g_dailyNetResult < 0.0)
       lossUsed = MathAbs(g_dailyNetResult)
                  / (AccountBalance() * MaximumDailyLossPercent / 100.0) * 100.0;
-   BentoBar("F_B1", x + 14, ty + 28, W - 28, 15, lossUsed, accB,
-            "DAILY LOSS BUDGET");
-   BentoLabel("F_P1", x + W - 52, ty + 30,
-              DoubleToString(lossUsed, 0) + "%", BentoInk, 7, true);
 
    int openNow = CountAllMagicPositions();
    double slotPct = MaxOpenPositions > 0
                     ? (double)openNow / (double)MaxOpenPositions * 100.0 : 0.0;
-   BentoBar("F_B2", x + 14, ty + 50, W - 28, 15, slotPct, accA,
-            "POSITION SLOTS");
-   BentoLabel("F_P2", x + W - 52, ty + 52,
-              IntegerToString(openNow) + "/"
-              + IntegerToString(MaxOpenPositions), BentoInk, 7, true);
 
    int tw = 0, wn = 0, ls = 0;
    double np = 0.0, gp = 0.0, gl = 0.0, tl = 0.0, aw = 0.0, al = 0.0;
    GetPerformanceStatistics(tw, wn, ls, np, gp, gl, tl, aw, al);
    double wr = OutcomeRate(wn, tw);
-   BentoBar("F_B3", x + 14, ty + 72, W - 28, 15, wr, accA, "WIN RATE");
-   BentoLabel("F_P3", x + W - 52, ty + 74,
-              DoubleToString(wr, 1) + "%", BentoInk, 7, true);
 
-   //--- TILE G : execution strip + pause ------------------------------
-   ty = y + 358;
-   BentoCard("G", x, ty, W, 76, accB);
-   BentoLabel("G_L", x + 14, ty + 8,
+   // label row, then bar row: nothing shares a line, so nothing overlaps
+   BentoLabel("F_L1", x + 14, ty + 31, "DAILY LOSS BUDGET", BentoInk, 9, true);
+   BentoLabel("F_P1", x + W - 66, ty + 31,
+              DoubleToString(lossUsed, 0) + "%", accB, 9, true);
+   BentoBar("F_B1", x + 14, ty + 47, W - 28, 14, lossUsed, accB, "");
+
+   BentoLabel("F_L2", x + 14, ty + 67, "POSITION SLOTS", BentoInk, 9, true);
+   BentoLabel("F_P2", x + W - 66, ty + 67,
+              IntegerToString(openNow) + " / "
+              + IntegerToString(MaxOpenPositions), accA, 9, true);
+   BentoBar("F_B2", x + 14, ty + 83, W - 28, 14, slotPct, accA, "");
+
+   BentoLabel("F_L3", x + 14, ty + 103, "WIN RATE", BentoInk, 9, true);
+   BentoLabel("F_P3", x + W - 66, ty + 103,
+              DoubleToString(wr, 1) + "%", accA, 9, true);
+   BentoBar("F_B3", x + 14, ty + 119, W - 28, 14, wr, accA, "");
+
+   //--- TILE G : execution + pause ------------------------------------
+   ty = y + 448;
+   BentoCard("G", x, ty, W, 96, accB);
+   BentoLabel("G_L", x + 14, ty + 9,
               Symbol() + " / " + TimeframeText(Period())
-              + "   LOT " + (LotSizingMode == LOT_FIXED
-                             ? DoubleToString(FixedLots, LotDigits())
-                             : "auto")
-              + "   R:R " + DoubleToString(RiskRewardRatio, 2),
-              BentoInk, 7, false);
-   BentoLabel("G_S", x + 14, ty + 22, ShortText(g_status, 46),
-              BentoInk, 7, false);
-   BentoButton("PAUSE", x + 12, ty + 40, W - 24, 24,
+              + "    LOT " + (LotSizingMode == LOT_FIXED
+                              ? DoubleToString(FixedLots, LotDigits())
+                              : "AUTO")
+              + "    R:R " + DoubleToString(RiskRewardRatio, 2),
+              BentoInk, 9, true);
+   BentoLabel("G_S", x + 14, ty + 29, ShortText(g_status, 44),
+              BentoInk, 8, false);
+   BentoButton("PAUSE", x + 12, ty + 52, W - 24, 32,
                g_entriesPaused ? "ENTRIES PAUSED - CLICK TO RESUME"
                                : "PAUSE NEW ENTRIES",
                g_entriesPaused ? accB : accA);
@@ -4393,7 +4396,7 @@ void DrawBentoPerformancePanel()
       }
    }
 
-   int W = 372;
+   int W = 470;
    int margin = ProfitTrackerRightMargin;
    if(margin < 5) margin = 5;
    long chartW = 0;
@@ -4405,7 +4408,7 @@ void DrawBentoPerformancePanel()
       return;
    }
    int x = (int)chartW - margin - W;
-   if(ShowEAStatus && x < DashboardX + 360)
+   if(ShowEAStatus && x < DashboardX + 410)
    {
       DeleteObjectsWithPrefix(g_objectPrefix + "BP_");
       g_lastTrackerHistoryCount = -1;
@@ -4416,35 +4419,41 @@ void DrawBentoPerformancePanel()
    color accA = BentoAccentA();
    color accB = BentoAccentB();
 
-   SetScreenRectangle(g_objectPrefix + "BP_SHELL_SH", x + 3, y + 4,
-                      W + 12, 400, BentoShadow, BentoShadow, 0);
-   SetScreenRectangle(g_objectPrefix + "BP_SHELL", x - 6, y - 6,
-                      W + 12, 400, BentoShell,
-                      BlendColor(accA, BentoShell, 0.35), 0);
-
-   //--- header tile ----------------------------------------------------
-   BentoPerfTile("H", x, y, W, 30, accA);
-   BentoPerfLabel("H_T", x + 12, y + 7, "PERFORMANCE", BentoInk, 8, true);
-   BentoPerfLabel("H_S", x + W - 108, y + 7,
-                  (TrackerAllSymbolsWithMagic ? "ALL SYMBOLS" : Symbol())
-                  + "  " + IntegerToString(days) + "D", accA, 7, true);
-
-   //--- daily table tile ------------------------------------------------
-   int ty = y + 38;
+   //--- geometry computed up-front so no two blocks can share a line ---
+   int rowH = 19;
    int maxRows = 7;
    int rows = 1;
    for(int q = 1; q < days; q++)
       if(dayTrades[q] > 0 && rows < maxRows) rows++;
 
-   int tableH = 30 + rows * 15 + 22;
+   int headH = 38;
+   int tableH = 34 + rows * rowH + 12;
+   int barsH = 208;
+   int shellH = headH + tableH + barsH + 30;
+
+   SetScreenRectangle(g_objectPrefix + "BP_SHELL_SH", x + 3, y + 4,
+                      W + 12, shellH, BentoShadow, BentoShadow, 0);
+   SetScreenRectangle(g_objectPrefix + "BP_SHELL", x - 6, y - 6,
+                      W + 12, shellH, BentoShell,
+                      BlendColor(accA, BentoShell, 0.35), 0);
+
+   //--- header tile ----------------------------------------------------
+   BentoPerfTile("H", x, y, W, headH, accA);
+   BentoPerfLabel("H_T", x + 14, y + 10, "PERFORMANCE", BentoInk, 11, true);
+   BentoPerfLabel("H_S", x + W - 150, y + 12,
+                  (TrackerAllSymbolsWithMagic ? "ALL SYMBOLS" : Symbol())
+                  + "   " + IntegerToString(days) + "D", accA, 9, true);
+
+   //--- daily table tile ------------------------------------------------
+   int ty = y + headH + 8;
    BentoPerfTile("T", x, ty, W, tableH, accA);
-   BentoPerfLabel("T_H", x + 12, ty + 8,
-                  PadRight("DATE", 11) + PadLeft("LOT", 6)
-                  + PadLeft("PROFIT", 10) + PadLeft("GAIN%", 8)
+   BentoPerfMonoBold("T_H", x + 12, ty + 9,
+                  PadRight("DATE", 12) + PadLeft("LOT", 6)
+                  + PadLeft("PROFIT", 11) + PadLeft("GAIN%", 9)
                   + PadLeft("TRD", 5) + PadLeft("W/L", 7)
                   + PadLeft("WIN%", 7),
-                  BlendColor(accA, BentoInk, 0.55), 7, true);
-   SetScreenRectangle(g_objectPrefix + "BP_T_RULE", x + 10, ty + 24,
+                  BlendColor(accA, BentoInk, 0.55), 9);
+   SetScreenRectangle(g_objectPrefix + "BP_T_RULE", x + 10, ty + 28,
                       W - 20, 1, BlendColor(accA, BentoTile, 0.45),
                       BlendColor(accA, BentoTile, 0.45), 3);
 
@@ -4463,10 +4472,10 @@ void DrawBentoPerformancePanel()
       double gp2 = startBal > 0.0 ? dayProfit[d2] / startBal * 100.0 : 0.0;
       double dwr = dayTrades[d2] > 0
                    ? (double)dayWins[d2] / dayTrades[d2] * 100.0 : 0.0;
-      string row = PadRight(TimeToString(todayStart - d2 * 86400, TIME_DATE), 11)
+      string row = PadRight(TimeToString(todayStart - d2 * 86400, TIME_DATE), 12)
                    + PadLeft(DoubleToString(dayLots[d2], 2), 6)
-                   + PadLeft(SignedNumber(dayProfit[d2], 2), 10)
-                   + PadLeft(SignedNumber(gp2, 2), 8)
+                   + PadLeft(SignedNumber(dayProfit[d2], 2), 11)
+                   + PadLeft(SignedNumber(gp2, 2), 9)
                    + PadLeft(IntegerToString(dayTrades[d2]), 5)
                    + PadLeft(IntegerToString(dayWins[d2]) + "/"
                              + IntegerToString(dayLosses[d2]), 7)
@@ -4474,60 +4483,65 @@ void DrawBentoPerformancePanel()
       color rc = dayProfit[d2] > 0.0 ? accA
                  : (dayProfit[d2] < 0.0 ? accB : BentoInk);
       BentoPerfMono("ROW" + IntegerToString(slot), x + 12,
-                    ty + 30 + slot * 15, row, rc, 7);
+                    ty + 34 + slot * rowH, row, rc, 9);
       slot++;
    }
 
-   //--- summary bar mosaic ----------------------------------------------
+   //--- profit by period -------------------------------------------------
    int by = ty + tableH + 8;
-   int barsH = 150;
    BentoPerfTile("G", x, by, W, barsH, accB);
-   BentoPerfLabel("G_L", x + 12, by + 8, "PROFIT BY PERIOD", BentoInk, 8, true);
+   BentoPerfLabel("G_L", x + 14, by + 9, "PROFIT BY PERIOD", BentoInk, 11, true);
 
    double vals[4];
    string names[4];
    int    trd[4], wns[4];
-   vals[0] = dayProfit[0];  names[0] = "DAILY";   trd[0] = dayTrades[0]; wns[0] = dayWins[0];
-   vals[1] = wkP;           names[1] = "WEEKLY";  trd[1] = wkT;          wns[1] = wkW;
-   vals[2] = moP;           names[2] = "MONTHLY"; trd[2] = moT;          wns[2] = moW;
-   vals[3] = tlP;           names[3] = "TOTAL";   trd[3] = tlT;          wns[3] = tlW;
+   vals[0] = dayProfit[0]; names[0] = "DAILY";   trd[0] = dayTrades[0]; wns[0] = dayWins[0];
+   vals[1] = wkP;          names[1] = "WEEKLY";  trd[1] = wkT;          wns[1] = wkW;
+   vals[2] = moP;          names[2] = "MONTHLY"; trd[2] = moT;          wns[2] = moW;
+   vals[3] = tlP;          names[3] = "TOTAL";   trd[3] = tlT;          wns[3] = tlW;
 
    double peak = 0.0;
    for(int v = 0; v < 4; v++)
       if(MathAbs(vals[v]) > peak) peak = MathAbs(vals[v]);
    if(peak <= 0.0) peak = 1.0;
 
-   int slotW = (W - 32) / 4;
-   int baseY = by + 112;
-   int maxBarH = 62;
+   // vertical budget inside the tile, each band on its own line:
+   //   value label / bars / period name / trades+win%
+   int valueY  = by + 34;
+   int baseY   = by + 130;      // bar baseline
+   int maxBarH = 74;
+   int nameY   = baseY + 8;
+   int subY    = baseY + 26;
+   int footY   = by + barsH - 24;
+
+   int slotW = (W - 36) / 4;
    for(int b2 = 0; b2 < 4; b2++)
    {
-      int bx = x + 16 + b2 * slotW;
+      int bx = x + 18 + b2 * slotW;
       double wrv = trd[b2] > 0 ? (double)wns[b2] / trd[b2] * 100.0 : 0.0;
       color bc = vals[b2] >= 0.0 ? accA : accB;
 
-      BentoPerfVBar("VB" + IntegerToString(b2), bx, baseY, 22, maxBarH,
+      BentoPerfLabel("VV" + IntegerToString(b2), bx, valueY,
+                     SignedNumber(vals[b2], 2), bc, 9, true);
+      BentoPerfVBar("VB" + IntegerToString(b2), bx, baseY, 30, maxBarH,
                     MathAbs(vals[b2]) / peak, bc);
-      BentoPerfVBar("VW" + IntegerToString(b2), bx + 26, baseY, 10, maxBarH,
+      BentoPerfVBar("VW" + IntegerToString(b2), bx + 36, baseY, 14, maxBarH,
                     wrv / 100.0, BlendColor(bc, BentoTile, 0.55));
-
-      BentoPerfLabel("VV" + IntegerToString(b2), bx,
-                     baseY - maxBarH - 14, SignedNumber(vals[b2], 2), bc, 7, true);
-      BentoPerfLabel("VN" + IntegerToString(b2), bx, baseY + 6,
-                     names[b2], BentoInk, 7, true);
-      BentoPerfLabel("VT" + IntegerToString(b2), bx, baseY + 18,
+      BentoPerfLabel("VN" + IntegerToString(b2), bx, nameY,
+                     names[b2], BentoInk, 9, true);
+      BentoPerfLabel("VT" + IntegerToString(b2), bx, subY,
                      IntegerToString(trd[b2]) + "t  "
-                     + DoubleToString(wrv, 0) + "%", BentoInk, 7, false);
+                     + DoubleToString(wrv, 0) + "%", BentoInk, 8, false);
    }
 
-   //--- footer totals ---------------------------------------------------
-   BentoPerfLabel("G_F", x + 12, by + barsH - 18,
-                  "TOTAL  " + SignedNumber(tlP, 2)
-                  + "   LOTS " + DoubleToString(tlLo, 2)
-                  + "   " + IntegerToString(tlW) + "W / "
+   //--- footer, on its own reserved line --------------------------------
+   BentoPerfLabel("G_F", x + 14, footY,
+                  "TOTAL " + SignedNumber(tlP, 2)
+                  + "    LOTS " + DoubleToString(tlLo, 2)
+                  + "    " + IntegerToString(tlW) + "W / "
                   + IntegerToString(tlL) + "L"
-                  + "   GAIN " + SignedNumber(TrackerGainPercent(tlP), 2) + "%",
-                  tlP >= 0.0 ? accA : accB, 7, true);
+                  + "    GAIN " + SignedNumber(TrackerGainPercent(tlP), 2) + "%",
+                  tlP >= 0.0 ? accA : accB, 9, true);
 }
 
 void BentoPerfTile(const string key, const int x, const int y,
@@ -4556,6 +4570,14 @@ void BentoPerfMono(const string key, const int x, const int y,
    string name = g_objectPrefix + "BP_" + key;
    SetCardLabel(name, x, y, text, c, size, false);
    ObjectSetString(0, name, OBJPROP_FONT, g_styleMonoFont);
+}
+
+void BentoPerfMonoBold(const string key, const int x, const int y,
+                       const string text, const color c, const int size)
+{
+   string name = g_objectPrefix + "BP_" + key;
+   SetCardLabel(name, x, y, text, c, size, true);
+   ObjectSetString(0, name, OBJPROP_FONT, g_styleMonoBoldFont);
 }
 
 void BentoPerfVBar(const string key, const int x, const int baseY,
