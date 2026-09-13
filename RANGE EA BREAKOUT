@@ -4784,10 +4784,10 @@ void DrawBentoPerformancePanel()
                   + PadLeft("PROFIT", 11) + PadLeft("GAIN%", 9)
                   + PadLeft("TRD", 5) + PadLeft("W/L", 7)
                   + PadLeft("WIN%", 7),
-                  BlendColor(accA, BentoInk, 0.55), 9);
-   SetScreenRectangle(g_objectPrefix + "BP_T_RULE", x + 10, ty + 28,
-                      W - 20, 1, BlendColor(accA, BentoTile, 0.45),
-                      BlendColor(accA, BentoTile, 0.45), 3);
+                  BrightenColor(SecTableColor, 0.55), 9);
+   SetScreenRectangle(g_objectPrefix + "BP_T_RULE", x + 10, ty + 46,
+                      W - 20, 1, BrightenColor(SecTableColor, -0.20),
+                      BrightenColor(SecTableColor, -0.20), 5);
 
    for(int stale = 0; stale < 40; stale++)
       DeleteObjectIfExists(g_objectPrefix + "BP_ROW" + IntegerToString(stale));
