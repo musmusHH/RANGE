@@ -4552,14 +4552,17 @@ void DrawBentoPerformancePanel()
    double tlP = 0.0, tlLo = 0.0;
 
    // Per-period detail: index 0 daily, 1 weekly, 2 monthly, 3 total.
+   // ArrayInitialize is used instead of a loop so the compiler can see
+   // that every element is definitely assigned before first use.
    double pGrossWin[4], pGrossLoss[4], pBest[4], pWorst[4], pLots[4];
    int    pTrades[4], pWins[4];
-   for(int z = 0; z < 4; z++)
-   {
-      pGrossWin[z] = 0.0; pGrossLoss[z] = 0.0;
-      pBest[z] = 0.0;     pWorst[z] = 0.0;
-      pLots[z] = 0.0;     pTrades[z] = 0; pWins[z] = 0;
-   }
+   ArrayInitialize(pGrossWin, 0.0);
+   ArrayInitialize(pGrossLoss, 0.0);
+   ArrayInitialize(pBest, 0.0);
+   ArrayInitialize(pWorst, 0.0);
+   ArrayInitialize(pLots, 0.0);
+   ArrayInitialize(pTrades, 0);
+   ArrayInitialize(pWins, 0);
 
    // Closed trades in time order, for the equity curve.
    datetime eqTime[];
@@ -4840,6 +4843,7 @@ void BentoDrawEquityCurve(const int x, const int y, const int W,
    // and build the running equity after every trade.
    double curve[];
    ArrayResize(curve, count + 1);
+   ArrayInitialize(curve, 0.0);
    curve[0] = 0.0;
    double run = 0.0;
    for(int i = count - 1; i >= 0; i--)
