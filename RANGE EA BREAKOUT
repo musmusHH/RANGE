@@ -173,6 +173,15 @@ input color                  ResultsHeaderColor = C'144,75,255';
 input color                  SuccessColor = C'0,225,130';
 input color                  FailureColor = C'255,72,82';
 
+//---- Bento dashboard (concept 4: indigo / turquoise / coral)
+input bool                   UseBentoDashboard = true;  // new mosaic panels
+input color                  BentoShell = C'22,27,52';
+input color                  BentoTile = C'31,38,68';
+input color                  BentoShadow = C'8,10,22';
+input color                  BentoInk = C'198,208,238';
+input color                  BentoTurquoise = C'54,226,208';
+input color                  BentoCoral = C'255,113,116';
+
 //---- Range zone rendering (solid cyan slab, raised, behind the candles)
 input bool                   RangeZoneRaised3D = true;       // bevel edges
 input bool                   RangeZoneShowMidline = true;
@@ -235,6 +244,7 @@ string   g_lastEntryDiagnosticReason = "";
 bool     g_qualityPassed = false;
 bool     g_entriesPaused = false; // session-local; exits and trailing remain active
 int      g_dashboardTab = 0;
+int      g_bentoTheme = 0;   // 0 aqua, 1 amber, 2 mint
 
 //---- Active selectable panel style
 color    g_styleMainHeader = C'0,140,255';
@@ -375,6 +385,17 @@ int OnInit()
          g_activePanelStyle = rememberedStyle;
    }
    ConfigurePanelStyle();
+   if(UseBentoDashboard)
+   {
+      // Remove every object produced by the legacy dashboards so the
+      // bento mosaic starts on a clean chart.
+      DeleteObjectsWithPrefix(g_objectPrefix + "FUT_");
+      DeleteObjectsWithPrefix(g_objectPrefix + "TRACK");
+      DeleteObjectsWithPrefix(g_objectPrefix + "SEC_");
+      DeleteObjectsWithPrefix(g_objectPrefix + "MAIN_");
+      DeleteObjectsWithPrefix(g_objectPrefix + "ANALYSIS_ROW_");
+      DeleteObjectsWithPrefix(g_objectPrefix + "STYLE_");
+   }
    if(ApplyProfessionalChartTheme)
       ApplyProChartTheme();
 
@@ -408,6 +429,28 @@ void OnChartEvent(const int id,
 {
    if(id == CHARTEVENT_OBJECT_CLICK)
    {
+      if(sparam == g_objectPrefix + "BN_PAUSE")
+      {
+         ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+         g_entriesPaused = !g_entriesPaused;
+         g_lastDashboardUpdate = 0;
+         UpdateStatusDisplay();
+         ChartRedraw(0);
+         return;
+      }
+      if(sparam == g_objectPrefix + "BN_THEME")
+      {
+         ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+         g_bentoTheme++;
+         if(g_bentoTheme > 2) g_bentoTheme = 0;
+         DeleteObjectsWithPrefix(g_objectPrefix + "BN_");
+         DeleteObjectsWithPrefix(g_objectPrefix + "BP_");
+         g_lastDashboardUpdate = 0;
+         g_lastTrackerHistoryCount = -1;
+         UpdateStatusDisplay();
+         ChartRedraw(0);
+         return;
+      }
       if(sparam == g_objectPrefix + "FUT_PAUSE" ||
          sparam == g_objectPrefix + "FUT_TAB0" ||
          sparam == g_objectPrefix + "FUT_TAB1" ||
@@ -2857,6 +2900,11 @@ void UpdateStatusDisplay()
 
 void DrawMainControlPanel()
 {
+   if(UseBentoDashboard)
+   {
+      DrawBentoMainPanel();
+      return;
+   }
    if(UseFuturisticDashboard)
    {
       DrawFuturisticPanel();
@@ -3415,9 +3463,16 @@ void DrawProfitTrackerCard()
    if(!ShowProfitTracker || !VisualOutputAvailable())
       return;
 
+   if(UseBentoDashboard)
+   {
+      DrawBentoPerformancePanel();
+      return;
+   }
+
    int currentHistoryCount = OrdersHistoryTotal();
    int currentDayKey = BrokerDayKey(TimeCurrent());
-   if(currentHistoryCount == g_lastTrackerHistoryCount &&
+   if(!UseBentoDashboard &&
+      currentHistoryCount == g_lastTrackerHistoryCount &&
       currentDayKey == g_lastTrackerDayKey)
       return;
    g_lastTrackerHistoryCount = currentHistoryCount;
@@ -3977,6 +4032,549 @@ void SetCardLabel(const string name,
    ObjectSetString(0, name, OBJPROP_FONT,
                    bold ? g_styleBoldFont : g_styleFont);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
+}
+
+
+//+------------------------------------------------------------------+
+//| BENTO DASHBOARD (concept 4) - indigo / turquoise / coral         |
+//| Built from scratch: mosaic tiles of mixed sizes, no tabs,        |
+//| no section rows, no style carousel.                              |
+//+------------------------------------------------------------------+
+color BentoAccentA()
+{
+   if(g_bentoTheme == 1) return(C'255,190,70');
+   if(g_bentoTheme == 2) return(C'150,240,120');
+   return(BentoTurquoise);
+}
+
+color BentoAccentB()
+{
+   if(g_bentoTheme == 1) return(C'120,190,255');
+   if(g_bentoTheme == 2) return(C'255,120,190');
+   return(BentoCoral);
+}
+
+string BentoThemeName()
+{
+   if(g_bentoTheme == 1) return("AMBER");
+   if(g_bentoTheme == 2) return("MINT");
+   return("AQUA");
+}
+
+//--- one rounded-look tile: shadow, body, soft top highlight ---------
+void BentoCard(const string key, const int x, const int y,
+               const int w, const int h, const color accent)
+{
+   string b = g_objectPrefix + "BN_" + key;
+   SetScreenRectangle(b + "_SH", x + 2, y + 3, w, h,
+                      BentoShadow, BentoShadow, 0);
+   SetScreenRectangle(b + "_BG", x, y, w, h,
+                      BentoTile, BlendColor(accent, BentoTile, 0.30), 1);
+   SetScreenRectangle(b + "_HL", x + 1, y + 1, w - 2, 1,
+                      BlendColor(clrWhite, BentoTile, 0.14),
+                      BlendColor(clrWhite, BentoTile, 0.14), 2);
+}
+
+void BentoLabel(const string key, const int x, const int y,
+                const string text, const color c,
+                const int size, const bool bold)
+{
+   SetCardLabel(g_objectPrefix + "BN_" + key, x, y, text, c, size, bold);
+}
+
+//--- horizontal capsule progress bar with label and percent ---------
+void BentoBar(const string key, const int x, const int y, const int w,
+              const int h, const double percent, const color accent,
+              const string caption)
+{
+   string b = g_objectPrefix + "BN_" + key;
+   double p = percent;
+   if(p < 0.0) p = 0.0;
+   if(p > 100.0) p = 100.0;
+   int fill = (int)(w * p / 100.0);
+   if(fill < 2 && p > 0.0) fill = 2;
+
+   SetScreenRectangle(b + "_TR", x, y, w, h,
+                      BlendColor(clrBlack, BentoTile, 0.45),
+                      BlendColor(clrBlack, BentoTile, 0.45), 3);
+   if(fill > 0)
+   {
+      SetScreenRectangle(b + "_FL", x, y, fill, h, accent, accent, 4);
+      SetScreenRectangle(b + "_GL", x, y, fill, 1,
+                         BlendColor(clrWhite, accent, 0.45),
+                         BlendColor(clrWhite, accent, 0.45), 5);
+   }
+   else
+      DeleteObjectIfExists(b + "_FL");
+   if(caption != "")
+      BentoLabel(key + "_CP", x + 6, y + (h - 11) / 2, caption,
+                 BentoInk, 7, true);
+}
+
+//--- vertical bar used by the performance mosaic --------------------
+void BentoVBar(const string key, const int x, const int baseY,
+               const int w, const int maxH, const double ratio,
+               const color accent)
+{
+   string b = g_objectPrefix + "BN_" + key;
+   double r = ratio;
+   if(r < 0.0) r = 0.0;
+   if(r > 1.0) r = 1.0;
+   int hh = (int)(maxH * r);
+   if(hh < 2) hh = 2;
+   SetScreenRectangle(b + "_TR", x, baseY - maxH, w, maxH,
+                      BlendColor(clrBlack, BentoTile, 0.40),
+                      BlendColor(clrBlack, BentoTile, 0.40), 3);
+   SetScreenRectangle(b + "_BR", x, baseY - hh, w, hh, accent, accent, 4);
+   SetScreenRectangle(b + "_CAP", x, baseY - hh, w, 2,
+                      BlendColor(clrWhite, accent, 0.50),
+                      BlendColor(clrWhite, accent, 0.50), 5);
+}
+
+void BentoButton(const string key, const int x, const int y,
+                 const int w, const int h, const string text,
+                 const color accent)
+{
+   string name = g_objectPrefix + "BN_" + key;
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR,
+                    BlendColor(accent, BentoTile, 0.22));
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
+   ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR,
+                    BlendColor(accent, BentoTile, 0.65));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 20);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_STATE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, name, OBJPROP_FONT, g_styleBoldFont);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+}
+
+string BentoCandleCountdown(double &fractionLeft)
+{
+   int secondsPerBar = Period() * 60;
+   int elapsed = (int)(TimeCurrent() - Time[0]);
+   if(elapsed < 0) elapsed = 0;
+   int left = secondsPerBar - elapsed;
+   if(left < 0) left = 0;
+   fractionLeft = secondsPerBar > 0
+                  ? (double)left / (double)secondsPerBar : 0.0;
+   int mm = left / 60;
+   int ss = left % 60;
+   return(StringFormat("%02d:%02d", mm, ss));
+}
+
+//+------------------------------------------------------------------+
+//| LEFT PANEL - bento mosaic                                        |
+//+------------------------------------------------------------------+
+void DrawBentoMainPanel()
+{
+   int x = DashboardX;
+   int y = DashboardY;
+   int W = 344;
+   color accA = BentoAccentA();
+   color accB = BentoAccentB();
+
+   // outer container
+   SetScreenRectangle(g_objectPrefix + "BN_SHELL_SH", x + 3, y + 4,
+                      W + 12, 452, BentoShadow, BentoShadow, 0);
+   SetScreenRectangle(g_objectPrefix + "BN_SHELL", x - 6, y - 6,
+                      W + 12, 452, BentoShell,
+                      BlendColor(accA, BentoShell, 0.35), 0);
+
+   double floating = FloatingEAProfit();
+   double equity = AccountEquity();
+   double balance = AccountBalance();
+   double gainPct = balance > 0.0 ? (equity - balance) / balance * 100.0 : 0.0;
+
+   //--- TILE A : equity, wide -----------------------------------------
+   int ty = y;
+   BentoCard("A", x, ty, W, 74, accA);
+   BentoLabel("A_L", x + 14, ty + 9, "ACCOUNT EQUITY", BentoInk, 8, false);
+   BentoLabel("A_V", x + 14, ty + 24, DoubleToString(equity, 2) + " "
+              + AccountCurrency(), accA, 17, true);
+   BentoLabel("A_S", x + 14, ty + 52,
+              "BAL " + DoubleToString(balance, 2)
+              + "   FLOAT " + SignedNumber(floating, 2)
+              + "   " + SignedNumber(gainPct, 2) + "%",
+              floating >= 0.0 ? accA : accB, 7, false);
+   BentoLabel("A_SPR", x + W - 92, ty + 9,
+              "SPREAD " + DoubleToString((Ask - Bid) / Point, 0),
+              BentoInk, 7, true);
+
+   //--- TILE B : range break (left square) ----------------------------
+   ty = y + 82;
+   int halfW = (W - 8) / 2;
+   BentoCard("B", x, ty, halfW, 96, accA);
+   BentoLabel("B_L", x + 12, ty + 8, "RANGE BREAK", BentoInk, 8, false);
+   BentoLabel("B_V", x + 12, ty + 24,
+              g_rangeActive ? "ACTIVE" : "WAITING",
+              g_rangeActive ? accA : BentoInk, 13, true);
+   if(g_rangeActive)
+   {
+      BentoLabel("B_T", x + 12, ty + 46,
+                 "TOP  " + DoubleToString(g_rangeTop, Digits), accA, 7, false);
+      BentoLabel("B_B", x + 12, ty + 58,
+                 "LOW  " + DoubleToString(g_rangeBottom, Digits), accB, 7, false);
+      double span = (g_rangeTop - g_rangeBottom) / Point;
+      BentoLabel("B_S", x + 12, ty + 70,
+                 "SPAN " + DoubleToString(span, 0) + " pts", BentoInk, 7, false);
+   }
+   else
+   {
+      BentoLabel("B_T", x + 12, ty + 46, "no active range", BentoInk, 7, false);
+      BentoLabel("B_B", x + 12, ty + 58, "", BentoInk, 7, false);
+      BentoLabel("B_S", x + 12, ty + 70, ShortText(g_status, 24), BentoInk, 7, false);
+   }
+
+   //--- TILE C : filters (right, tall) --------------------------------
+   int cx = x + halfW + 8;
+   BentoCard("C", cx, ty, halfW, 96, accB);
+   BentoLabel("C_L", cx + 12, ty + 8, "FILTERS", BentoInk, 8, false);
+
+   double spread = (Ask - Bid) / Point;
+   bool fSpread = (MaximumSpreadPoints <= 0 || spread <= MaximumSpreadPoints);
+   bool fDaily = !g_dailyLossBlocked;
+   bool fPerm = IsTradeAllowed() && !g_entriesPaused;
+   bool fSession = InEntrySession();
+
+   string fName[4];  bool fState[4];
+   fName[0] = "SPREAD";  fState[0] = fSpread;
+   fName[1] = "DAY LOSS"; fState[1] = fDaily;
+   fName[2] = "SESSION";  fState[2] = fSession;
+   fName[3] = "EXECUTION"; fState[3] = fPerm;
+
+   for(int f = 0; f < 4; f++)
+   {
+      int fy = ty + 26 + f * 17;
+      color sc = fState[f] ? accA : accB;
+      SetScreenRectangle(g_objectPrefix + "BN_C_SW" + IntegerToString(f),
+                         cx + 12, fy + 2, 22, 10, sc, sc, 4);
+      SetScreenRectangle(g_objectPrefix + "BN_C_KN" + IntegerToString(f),
+                         fState[f] ? cx + 24 : cx + 13, fy + 3, 9, 8,
+                         clrWhite, clrWhite, 5);
+      BentoLabel("C_N" + IntegerToString(f), cx + 42, fy,
+                 fName[f], fState[f] ? BentoInk : accB, 7, false);
+   }
+
+   //--- TILE D : theme switch (small) + countdown (wide) --------------
+   ty = y + 186;
+   int themeW = 104;
+   BentoCard("D", x, ty, themeW, 52, accB);
+   BentoLabel("D_L", x + 12, ty + 7, "THEME", BentoInk, 7, false);
+   BentoButton("THEME", x + 10, ty + 21, themeW - 20, 22,
+               BentoThemeName(), accB);
+
+   int cdX = x + themeW + 8;
+   int cdW = W - themeW - 8;
+   BentoCard("E", cdX, ty, cdW, 52, accA);
+   double frac = 0.0;
+   string cd = BentoCandleCountdown(frac);
+   BentoLabel("E_L", cdX + 12, ty + 7, "NEXT CANDLE", BentoInk, 7, false);
+   BentoLabel("E_V", cdX + cdW - 62, ty + 4, cd, accA, 14, true);
+   BentoBar("E_BAR", cdX + 12, ty + 30, cdW - 24, 12,
+            frac * 100.0, accA, "");
+
+   //--- TILE F : objectives / progress bars ---------------------------
+   ty = y + 246;
+   BentoCard("F", x, ty, W, 104, accA);
+   BentoLabel("F_L", x + 14, ty + 8, "OBJECTIVES", BentoInk, 8, false);
+
+   double lossUsed = 0.0;
+   if(MaximumDailyLossPercent > 0.0 && g_dailyNetResult < 0.0)
+      lossUsed = MathAbs(g_dailyNetResult)
+                 / (AccountBalance() * MaximumDailyLossPercent / 100.0) * 100.0;
+   BentoBar("F_B1", x + 14, ty + 28, W - 28, 15, lossUsed, accB,
+            "DAILY LOSS BUDGET");
+   BentoLabel("F_P1", x + W - 52, ty + 30,
+              DoubleToString(lossUsed, 0) + "%", BentoInk, 7, true);
+
+   int openNow = CountAllMagicPositions();
+   double slotPct = MaxOpenPositions > 0
+                    ? (double)openNow / (double)MaxOpenPositions * 100.0 : 0.0;
+   BentoBar("F_B2", x + 14, ty + 50, W - 28, 15, slotPct, accA,
+            "POSITION SLOTS");
+   BentoLabel("F_P2", x + W - 52, ty + 52,
+              IntegerToString(openNow) + "/"
+              + IntegerToString(MaxOpenPositions), BentoInk, 7, true);
+
+   int tw = 0, wn = 0, ls = 0;
+   double np = 0.0, gp = 0.0, gl = 0.0, tl = 0.0, aw = 0.0, al = 0.0;
+   GetPerformanceStatistics(tw, wn, ls, np, gp, gl, tl, aw, al);
+   double wr = OutcomeRate(wn, tw);
+   BentoBar("F_B3", x + 14, ty + 72, W - 28, 15, wr, accA, "WIN RATE");
+   BentoLabel("F_P3", x + W - 52, ty + 74,
+              DoubleToString(wr, 1) + "%", BentoInk, 7, true);
+
+   //--- TILE G : execution strip + pause ------------------------------
+   ty = y + 358;
+   BentoCard("G", x, ty, W, 76, accB);
+   BentoLabel("G_L", x + 14, ty + 8,
+              Symbol() + " / " + TimeframeText(Period())
+              + "   LOT " + (LotSizingMode == LOT_FIXED
+                             ? DoubleToString(FixedLots, LotDigits())
+                             : "auto")
+              + "   R:R " + DoubleToString(RiskRewardRatio, 2),
+              BentoInk, 7, false);
+   BentoLabel("G_S", x + 14, ty + 22, ShortText(g_status, 46),
+              BentoInk, 7, false);
+   BentoButton("PAUSE", x + 12, ty + 40, W - 24, 24,
+               g_entriesPaused ? "ENTRIES PAUSED - CLICK TO RESUME"
+                               : "PAUSE NEW ENTRIES",
+               g_entriesPaused ? accB : accA);
+}
+
+//+------------------------------------------------------------------+
+//| RIGHT PANEL - performance mosaic                                 |
+//+------------------------------------------------------------------+
+void DrawBentoPerformancePanel()
+{
+   int days = ProfitTrackerDays;
+   if(days < 1) days = 1;
+   if(days > 60) days = 60;
+
+   double dayLots[], dayProfit[];
+   int dayTrades[], dayWins[], dayLosses[];
+   ArrayResize(dayLots, days);   ArrayInitialize(dayLots, 0.0);
+   ArrayResize(dayProfit, days); ArrayInitialize(dayProfit, 0.0);
+   ArrayResize(dayTrades, days); ArrayInitialize(dayTrades, 0);
+   ArrayResize(dayWins, days);   ArrayInitialize(dayWins, 0);
+   ArrayResize(dayLosses, days); ArrayInitialize(dayLosses, 0);
+
+   datetime todayStart = BrokerDayStart(TimeCurrent());
+   MqlDateTime cal;
+   TimeToStruct(todayStart, cal);
+   int sinceMonday = (cal.day_of_week + 6) % 7;
+   datetime weekStart = todayStart - sinceMonday * 86400;
+   cal.day = 1;
+   datetime monthStart = StructToTime(cal);
+
+   int wkT = 0, wkW = 0, wkL = 0, moT = 0, moW = 0, moL = 0;
+   int tlT = 0, tlW = 0, tlL = 0;
+   double wkP = 0.0, wkLo = 0.0, moP = 0.0, moLo = 0.0;
+   double tlP = 0.0, tlLo = 0.0;
+
+   for(int h = OrdersHistoryTotal() - 1; h >= 0; h--)
+   {
+      if(!OrderSelect(h, SELECT_BY_POS, MODE_HISTORY)) continue;
+      if(OrderMagicNumber() != MagicNumber) continue;
+      if(!TrackerAllSymbolsWithMagic && OrderSymbol() != Symbol()) continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
+
+      datetime ct = OrderCloseTime();
+      double r = OrderProfit() + OrderSwap() + OrderCommission();
+      bool win = (r > 0.0);
+
+      tlT++; tlP += r; tlLo += OrderLots();
+      if(win) tlW++; else tlL++;
+
+      if(ct >= weekStart)
+      { wkT++; wkP += r; wkLo += OrderLots(); if(win) wkW++; else wkL++; }
+      if(ct >= monthStart)
+      { moT++; moP += r; moLo += OrderLots(); if(win) moW++; else moL++; }
+
+      for(int d = 0; d < days; d++)
+      {
+         datetime ds = todayStart - d * 86400;
+         if(ct >= ds && ct < ds + 86400)
+         {
+            dayLots[d] += OrderLots(); dayProfit[d] += r;
+            dayTrades[d]++; if(win) dayWins[d]++; else dayLosses[d]++;
+            break;
+         }
+      }
+   }
+
+   int W = 372;
+   int margin = ProfitTrackerRightMargin;
+   if(margin < 5) margin = 5;
+   long chartW = 0;
+   ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0, chartW);
+   if(chartW < W + margin + 20)
+   {
+      DeleteObjectsWithPrefix(g_objectPrefix + "BP_");
+      g_lastTrackerHistoryCount = -1;
+      return;
+   }
+   int x = (int)chartW - margin - W;
+   if(ShowEAStatus && x < DashboardX + 360)
+   {
+      DeleteObjectsWithPrefix(g_objectPrefix + "BP_");
+      g_lastTrackerHistoryCount = -1;
+      return;
+   }
+   int y = ProfitTrackerY;
+
+   color accA = BentoAccentA();
+   color accB = BentoAccentB();
+
+   SetScreenRectangle(g_objectPrefix + "BP_SHELL_SH", x + 3, y + 4,
+                      W + 12, 400, BentoShadow, BentoShadow, 0);
+   SetScreenRectangle(g_objectPrefix + "BP_SHELL", x - 6, y - 6,
+                      W + 12, 400, BentoShell,
+                      BlendColor(accA, BentoShell, 0.35), 0);
+
+   //--- header tile ----------------------------------------------------
+   BentoPerfTile("H", x, y, W, 30, accA);
+   BentoPerfLabel("H_T", x + 12, y + 7, "PERFORMANCE", BentoInk, 8, true);
+   BentoPerfLabel("H_S", x + W - 108, y + 7,
+                  (TrackerAllSymbolsWithMagic ? "ALL SYMBOLS" : Symbol())
+                  + "  " + IntegerToString(days) + "D", accA, 7, true);
+
+   //--- daily table tile ------------------------------------------------
+   int ty = y + 38;
+   int maxRows = 7;
+   int rows = 1;
+   for(int q = 1; q < days; q++)
+      if(dayTrades[q] > 0 && rows < maxRows) rows++;
+
+   int tableH = 30 + rows * 15 + 22;
+   BentoPerfTile("T", x, ty, W, tableH, accA);
+   BentoPerfLabel("T_H", x + 12, ty + 8,
+                  PadRight("DATE", 11) + PadLeft("LOT", 6)
+                  + PadLeft("PROFIT", 10) + PadLeft("GAIN%", 8)
+                  + PadLeft("TRD", 5) + PadLeft("W/L", 7)
+                  + PadLeft("WIN%", 7),
+                  BlendColor(accA, BentoInk, 0.55), 7, true);
+   SetScreenRectangle(g_objectPrefix + "BP_T_RULE", x + 10, ty + 24,
+                      W - 20, 1, BlendColor(accA, BentoTile, 0.45),
+                      BlendColor(accA, BentoTile, 0.45), 3);
+
+   for(int stale = 0; stale < 40; stale++)
+      DeleteObjectIfExists(g_objectPrefix + "BP_ROW" + IntegerToString(stale));
+
+   double cum = 0.0;
+   int slot = 0;
+   for(int d2 = 0; d2 < days; d2++)
+   {
+      cum += dayProfit[d2];
+      if(d2 > 0 && dayTrades[d2] <= 0) continue;
+      if(slot >= rows) break;
+      double startBal = AccountBalance() - cum;
+      if(startBal <= 0.0) startBal = AccountBalance();
+      double gp2 = startBal > 0.0 ? dayProfit[d2] / startBal * 100.0 : 0.0;
+      double dwr = dayTrades[d2] > 0
+                   ? (double)dayWins[d2] / dayTrades[d2] * 100.0 : 0.0;
+      string row = PadRight(TimeToString(todayStart - d2 * 86400, TIME_DATE), 11)
+                   + PadLeft(DoubleToString(dayLots[d2], 2), 6)
+                   + PadLeft(SignedNumber(dayProfit[d2], 2), 10)
+                   + PadLeft(SignedNumber(gp2, 2), 8)
+                   + PadLeft(IntegerToString(dayTrades[d2]), 5)
+                   + PadLeft(IntegerToString(dayWins[d2]) + "/"
+                             + IntegerToString(dayLosses[d2]), 7)
+                   + PadLeft(DoubleToString(dwr, 0) + "%", 7);
+      color rc = dayProfit[d2] > 0.0 ? accA
+                 : (dayProfit[d2] < 0.0 ? accB : BentoInk);
+      BentoPerfMono("ROW" + IntegerToString(slot), x + 12,
+                    ty + 30 + slot * 15, row, rc, 7);
+      slot++;
+   }
+
+   //--- summary bar mosaic ----------------------------------------------
+   int by = ty + tableH + 8;
+   int barsH = 150;
+   BentoPerfTile("G", x, by, W, barsH, accB);
+   BentoPerfLabel("G_L", x + 12, by + 8, "PROFIT BY PERIOD", BentoInk, 8, true);
+
+   double vals[4];
+   string names[4];
+   int    trd[4], wns[4];
+   vals[0] = dayProfit[0];  names[0] = "DAILY";   trd[0] = dayTrades[0]; wns[0] = dayWins[0];
+   vals[1] = wkP;           names[1] = "WEEKLY";  trd[1] = wkT;          wns[1] = wkW;
+   vals[2] = moP;           names[2] = "MONTHLY"; trd[2] = moT;          wns[2] = moW;
+   vals[3] = tlP;           names[3] = "TOTAL";   trd[3] = tlT;          wns[3] = tlW;
+
+   double peak = 0.0;
+   for(int v = 0; v < 4; v++)
+      if(MathAbs(vals[v]) > peak) peak = MathAbs(vals[v]);
+   if(peak <= 0.0) peak = 1.0;
+
+   int slotW = (W - 32) / 4;
+   int baseY = by + 112;
+   int maxBarH = 62;
+   for(int b2 = 0; b2 < 4; b2++)
+   {
+      int bx = x + 16 + b2 * slotW;
+      double wrv = trd[b2] > 0 ? (double)wns[b2] / trd[b2] * 100.0 : 0.0;
+      color bc = vals[b2] >= 0.0 ? accA : accB;
+
+      BentoPerfVBar("VB" + IntegerToString(b2), bx, baseY, 22, maxBarH,
+                    MathAbs(vals[b2]) / peak, bc);
+      BentoPerfVBar("VW" + IntegerToString(b2), bx + 26, baseY, 10, maxBarH,
+                    wrv / 100.0, BlendColor(bc, BentoTile, 0.55));
+
+      BentoPerfLabel("VV" + IntegerToString(b2), bx,
+                     baseY - maxBarH - 14, SignedNumber(vals[b2], 2), bc, 7, true);
+      BentoPerfLabel("VN" + IntegerToString(b2), bx, baseY + 6,
+                     names[b2], BentoInk, 7, true);
+      BentoPerfLabel("VT" + IntegerToString(b2), bx, baseY + 18,
+                     IntegerToString(trd[b2]) + "t  "
+                     + DoubleToString(wrv, 0) + "%", BentoInk, 7, false);
+   }
+
+   //--- footer totals ---------------------------------------------------
+   BentoPerfLabel("G_F", x + 12, by + barsH - 18,
+                  "TOTAL  " + SignedNumber(tlP, 2)
+                  + "   LOTS " + DoubleToString(tlLo, 2)
+                  + "   " + IntegerToString(tlW) + "W / "
+                  + IntegerToString(tlL) + "L"
+                  + "   GAIN " + SignedNumber(TrackerGainPercent(tlP), 2) + "%",
+                  tlP >= 0.0 ? accA : accB, 7, true);
+}
+
+void BentoPerfTile(const string key, const int x, const int y,
+                   const int w, const int h, const color accent)
+{
+   string b = g_objectPrefix + "BP_" + key;
+   SetScreenRectangle(b + "_SH", x + 2, y + 3, w, h,
+                      BentoShadow, BentoShadow, 0);
+   SetScreenRectangle(b + "_BG", x, y, w, h, BentoTile,
+                      BlendColor(accent, BentoTile, 0.30), 1);
+   SetScreenRectangle(b + "_HL", x + 1, y + 1, w - 2, 1,
+                      BlendColor(clrWhite, BentoTile, 0.14),
+                      BlendColor(clrWhite, BentoTile, 0.14), 2);
+}
+
+void BentoPerfLabel(const string key, const int x, const int y,
+                    const string text, const color c,
+                    const int size, const bool bold)
+{
+   SetCardLabel(g_objectPrefix + "BP_" + key, x, y, text, c, size, bold);
+}
+
+void BentoPerfMono(const string key, const int x, const int y,
+                   const string text, const color c, const int size)
+{
+   string name = g_objectPrefix + "BP_" + key;
+   SetCardLabel(name, x, y, text, c, size, false);
+   ObjectSetString(0, name, OBJPROP_FONT, g_styleMonoFont);
+}
+
+void BentoPerfVBar(const string key, const int x, const int baseY,
+                   const int w, const int maxH, const double ratio,
+                   const color accent)
+{
+   string b = g_objectPrefix + "BP_" + key;
+   double r = ratio;
+   if(r < 0.0) r = 0.0;
+   if(r > 1.0) r = 1.0;
+   int hh = (int)(maxH * r);
+   if(hh < 2) hh = 2;
+   SetScreenRectangle(b + "_TR", x, baseY - maxH, w, maxH,
+                      BlendColor(clrBlack, BentoTile, 0.40),
+                      BlendColor(clrBlack, BentoTile, 0.40), 3);
+   SetScreenRectangle(b + "_BR", x, baseY - hh, w, hh, accent, accent, 4);
+   SetScreenRectangle(b + "_CAP", x, baseY - hh, w, 2,
+                      BlendColor(clrWhite, accent, 0.50),
+                      BlendColor(clrWhite, accent, 0.50), 5);
 }
 
 //+------------------------------------------------------------------+
