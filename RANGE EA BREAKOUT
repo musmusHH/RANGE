@@ -173,17 +173,14 @@ input color                  ResultsHeaderColor = C'144,75,255';
 input color                  SuccessColor = C'0,225,130';
 input color                  FailureColor = C'255,72,82';
 
-//---- Range zone rendering (neutral blue/gold, 3D embossed, behind bars)
-input bool                   RangeZoneRaised3D = true;       // emboss + shadow
+//---- Range zone rendering (solid cyan slab, raised, behind the candles)
+input bool                   RangeZoneRaised3D = true;       // bevel edges
 input bool                   RangeZoneShowMidline = true;
 input bool                   RangeZoneShowLeftEdge = true;
-input color                  RangeZoneFillColor = C'38,86,168';    // neutral blue
-input color                  RangeZoneAccentColor = C'214,170,72'; // gold
-input color                  RangeZoneShadowColor = C'4,7,14';
-input double                 RangeZoneFillOpacity = 0.16;
+input color                  RangeZoneFillColor = C'0,150,190';    // solid cyan
+input color                  RangeZoneTopLineColor = C'40,120,255'; // blue top
+input color                  RangeZoneBottomLineColor = C'235,45,60'; // red low
 input int                    RangeZoneBorderWidth = 2;
-input int                    RangeZoneShadowOffsetBars = 1;
-input double                 RangeZoneShadowOffsetATR = 0.06;
 
 //---- Committed range state (state after the latest completed candle)
 bool     g_rangeActive = false;
@@ -2550,51 +2547,24 @@ void DrawRangeZone(const string baseName,
    double middle = (top + bottom) * 0.5;
    double height = top - bottom;
 
-   // Neutral blue body with a gold accent frame. Everything stays behind
-   // the candles; the 3D feel comes from the offset shadow plus the
-   // light/dark bevel edges rather than from stacking objects on top.
-   double fillOpacity = RangeZoneFillOpacity;
-   if(fillOpacity < 0.02) fillOpacity = 0.02;
-   if(fillOpacity > 0.85) fillOpacity = 0.85;
-
-   color bodyColor  = BlendColor(RangeZoneFillColor,
-                                 ProBackgroundColor, fillOpacity);
-   color upperColor = BlendColor(RangeZoneFillColor,
-                                 ProBackgroundColor, fillOpacity * 1.45);
-   color lowerColor = BlendColor(RangeZoneFillColor,
-                                 ProBackgroundColor, fillOpacity * 0.70);
-   color bevelLight = BlendColor(RangeZoneAccentColor,
-                                 ProBackgroundColor, 0.85);
-   color bevelDark  = BlendColor(RangeZoneShadowColor,
-                                 RangeZoneFillColor, 0.75);
-   color shadowColor = BlendColor(RangeZoneShadowColor,
-                                  ProBackgroundColor, 0.55);
-   color midColor = BlendColor(RangeZoneAccentColor,
-                               ProBackgroundColor, 0.38);
+   // Solid cyan slab, fully opaque, drawn behind the candles. The raised
+   // look comes purely from the bevel shading on the fill, no shadow and
+   // no blending toward the chart background.
+   color bodyColor  = RangeZoneFillColor;
+   color upperColor = BrightenColor(RangeZoneFillColor, 0.22);
+   color lowerColor = BrightenColor(RangeZoneFillColor, -0.28);
+   color bevelLight = BrightenColor(RangeZoneFillColor, 0.55);
+   color bevelDark  = BrightenColor(RangeZoneFillColor, -0.50);
+   color midColor   = BrightenColor(RangeZoneFillColor, 0.35);
 
    int borderWidth = RangeZoneBorderWidth;
    if(borderWidth < 1) borderWidth = 1;
    if(borderWidth > 5) borderWidth = 5;
 
-   // ---- drop shadow (offset down/right) for the raised illusion --------
-   if(RangeZoneRaised3D)
-   {
-      int offBars = RangeZoneShadowOffsetBars;
-      if(offBars < 0) offBars = 0;
-      double offPrice = height * RangeZoneShadowOffsetATR;
-      if(offPrice <= 0.0) offPrice = Point * 10;
+   // Legacy shadow objects from earlier builds are cleared on every pass.
+   DeleteObjectIfExists(baseName + "_SHADOW");
 
-      datetime shadowLeft  = ShiftTimeByBars(leftTime, offBars);
-      datetime shadowRight = ShiftTimeByBars(rightTime, offBars);
-
-      SetPriceRectangle(baseName + "_SHADOW", shadowLeft,
-                        top - offPrice, shadowRight,
-                        bottom - offPrice, shadowColor, true);
-   }
-   else
-      DeleteObjectIfExists(baseName + "_SHADOW");
-
-   // ---- main body: light on top, darker below = embossed slab ----------
+   // ---- solid body: lit upper half, shaded lower half = raised slab ----
    SetPriceRectangle(baseName + "_BODY", leftTime, top, rightTime,
                      bottom, bodyColor, true);
    SetPriceRectangle(baseName + "_UP", leftTime, top, rightTime,
@@ -2602,15 +2572,15 @@ void DrawRangeZone(const string baseName,
    SetPriceRectangle(baseName + "_DN", leftTime, middle, rightTime,
                      bottom, lowerColor, true);
 
-   // ---- gold frame ------------------------------------------------------
+   // ---- boundary lines: blue on top, red on the bottom -----------------
    SetPriceTrend(baseName + "_TOP", leftTime, top, rightTime, top,
-                 RangeZoneAccentColor, STYLE_SOLID, borderWidth);
+                 RangeZoneTopLineColor, STYLE_SOLID, borderWidth);
    SetPriceTrend(baseName + "_BOTTOM", leftTime, bottom,
-                 rightTime, bottom, RangeZoneAccentColor,
+                 rightTime, bottom, RangeZoneBottomLineColor,
                  STYLE_SOLID, borderWidth);
 
-   // ---- bevel highlights: bright just under the top edge, dark just
-   //      above the bottom edge -> surface appears lifted ---------------
+   // ---- bevel: bright band under the top edge, dark band above the
+   //      bottom edge -> the slab reads as lifted off the chart ---------
    if(RangeZoneRaised3D && height > 0.0)
    {
       double inset = height * 0.06;
@@ -2635,9 +2605,41 @@ void DrawRangeZone(const string baseName,
    // ---- vertical accent marking where the range was formed -------------
    if(RangeZoneShowLeftEdge)
       SetPriceTrend(baseName + "_EDGE", leftTime, top, leftTime,
-                    bottom, RangeZoneAccentColor, STYLE_SOLID, 1);
+                    bottom, bevelLight, STYLE_SOLID, 1);
    else
       DeleteObjectIfExists(baseName + "_EDGE");
+}
+
+//+------------------------------------------------------------------+
+//| Lighten (amount > 0) or darken (amount < 0) a color              |
+//+------------------------------------------------------------------+
+color BrightenColor(const color base, const double amount)
+{
+   int c = (int)base;
+   int r = c & 0xFF;
+   int g = (c >> 8) & 0xFF;
+   int b = (c >> 16) & 0xFF;
+
+   if(amount >= 0.0)
+   {
+      r = r + (int)((255 - r) * amount);
+      g = g + (int)((255 - g) * amount);
+      b = b + (int)((255 - b) * amount);
+   }
+   else
+   {
+      double k = 1.0 + amount;
+      if(k < 0.0) k = 0.0;
+      r = (int)(r * k);
+      g = (int)(g * k);
+      b = (int)(b * k);
+   }
+
+   if(r < 0) r = 0; if(r > 255) r = 255;
+   if(g < 0) g = 0; if(g > 255) g = 255;
+   if(b < 0) b = 0; if(b > 255) b = 255;
+
+   return((color)(r | (g << 8) | (b << 16)));
 }
 
 //+------------------------------------------------------------------+
