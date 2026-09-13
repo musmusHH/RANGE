@@ -173,6 +173,28 @@ input color                  ResultsHeaderColor = C'144,75,255';
 input color                  SuccessColor = C'0,225,130';
 input color                  FailureColor = C'255,72,82';
 
+//---- Range zone rendering (neutral blue/gold, 3D embossed, behind bars)
+input bool                   RangeZoneRaised3D = true;       // emboss + shadow
+input bool                   RangeZoneShowMidline = true;
+input bool                   RangeZoneShowLeftEdge = true;
+input color                  RangeZoneFillColor = C'38,86,168';    // neutral blue
+input color                  RangeZoneAccentColor = C'214,170,72'; // gold
+input color                  RangeZoneShadowColor = C'4,7,14';
+input double                 RangeZoneFillOpacity = 0.16;
+input int                    RangeZoneBorderWidth = 2;
+input int                    RangeZoneShadowOffsetBars = 1;
+input double                 RangeZoneShadowOffsetATR = 0.06;
+
+//---- Signal / outcome annotation cards (kept far from price action)
+input bool                   ShowSignalCards = true;
+input double                 SignalCardDistanceATR = 3.20;   // gap from candles
+input double                 SignalCardHeightATR = 0.85;
+input int                    SignalCardWidthBars = 16;
+input int                    SignalCardOffsetBars = 3;
+input int                    SignalCardFontSize = 8;
+input color                  SignalCardBodyColor = C'16,24,40';
+input color                  SignalCardShadowColor = C'4,7,14';
+
 //---- Committed range state (state after the latest completed candle)
 bool     g_rangeActive = false;
 double   g_rangeTop = 0.0;
@@ -2536,23 +2558,105 @@ void DrawRangeZone(const string baseName,
       return;
 
    double middle = (top + bottom) * 0.5;
-   color bodyColor = BlendColor(ProForegroundColor,
-                                ProBackgroundColor, 0.10);
-   color upperColor = BlendColor(ProBullColor,
-                                 ProBackgroundColor, 0.23);
-   color lowerColor = BlendColor(ProBearColor,
-                                 ProBackgroundColor, 0.20);
+   double height = top - bottom;
 
+   // Neutral blue body with a gold accent frame. Everything stays behind
+   // the candles; the 3D feel comes from the offset shadow plus the
+   // light/dark bevel edges rather than from stacking objects on top.
+   double fillOpacity = RangeZoneFillOpacity;
+   if(fillOpacity < 0.02) fillOpacity = 0.02;
+   if(fillOpacity > 0.85) fillOpacity = 0.85;
+
+   color bodyColor  = BlendColor(RangeZoneFillColor,
+                                 ProBackgroundColor, fillOpacity);
+   color upperColor = BlendColor(RangeZoneFillColor,
+                                 ProBackgroundColor, fillOpacity * 1.45);
+   color lowerColor = BlendColor(RangeZoneFillColor,
+                                 ProBackgroundColor, fillOpacity * 0.70);
+   color bevelLight = BlendColor(RangeZoneAccentColor,
+                                 ProBackgroundColor, 0.85);
+   color bevelDark  = BlendColor(RangeZoneShadowColor,
+                                 RangeZoneFillColor, 0.75);
+   color shadowColor = BlendColor(RangeZoneShadowColor,
+                                  ProBackgroundColor, 0.55);
+   color midColor = BlendColor(RangeZoneAccentColor,
+                               ProBackgroundColor, 0.38);
+
+   int borderWidth = RangeZoneBorderWidth;
+   if(borderWidth < 1) borderWidth = 1;
+   if(borderWidth > 5) borderWidth = 5;
+
+   // ---- drop shadow (offset down/right) for the raised illusion --------
+   if(RangeZoneRaised3D)
+   {
+      int offBars = RangeZoneShadowOffsetBars;
+      if(offBars < 0) offBars = 0;
+      double offPrice = height * RangeZoneShadowOffsetATR;
+      if(offPrice <= 0.0) offPrice = Point * 10;
+
+      datetime shadowLeft  = ShiftTimeByBars(leftTime, offBars);
+      datetime shadowRight = ShiftTimeByBars(rightTime, offBars);
+
+      SetPriceRectangle(baseName + "_SHADOW", shadowLeft,
+                        top - offPrice, shadowRight,
+                        bottom - offPrice, shadowColor, true);
+   }
+   else
+      DeleteObjectIfExists(baseName + "_SHADOW");
+
+   // ---- main body: light on top, darker below = embossed slab ----------
    SetPriceRectangle(baseName + "_BODY", leftTime, top, rightTime,
                      bottom, bodyColor, true);
    SetPriceRectangle(baseName + "_UP", leftTime, top, rightTime,
                      middle, upperColor, true);
    SetPriceRectangle(baseName + "_DN", leftTime, middle, rightTime,
                      bottom, lowerColor, true);
+
+   // ---- gold frame ------------------------------------------------------
    SetPriceTrend(baseName + "_TOP", leftTime, top, rightTime, top,
-                 ProBullColor, STYLE_DOT, 1);
+                 RangeZoneAccentColor, STYLE_SOLID, borderWidth);
    SetPriceTrend(baseName + "_BOTTOM", leftTime, bottom,
-                 rightTime, bottom, ProBearColor, STYLE_DOT, 1);
+                 rightTime, bottom, RangeZoneAccentColor,
+                 STYLE_SOLID, borderWidth);
+
+   // ---- bevel highlights: bright just under the top edge, dark just
+   //      above the bottom edge -> surface appears lifted ---------------
+   if(RangeZoneRaised3D && height > 0.0)
+   {
+      double inset = height * 0.06;
+      SetPriceTrend(baseName + "_BEVEL_HI", leftTime, top - inset,
+                    rightTime, top - inset, bevelLight, STYLE_SOLID, 1);
+      SetPriceTrend(baseName + "_BEVEL_LO", leftTime, bottom + inset,
+                    rightTime, bottom + inset, bevelDark, STYLE_SOLID, 1);
+   }
+   else
+   {
+      DeleteObjectIfExists(baseName + "_BEVEL_HI");
+      DeleteObjectIfExists(baseName + "_BEVEL_LO");
+   }
+
+   // ---- equilibrium midline --------------------------------------------
+   if(RangeZoneShowMidline)
+      SetPriceTrend(baseName + "_MID", leftTime, middle, rightTime,
+                    middle, midColor, STYLE_DOT, 1);
+   else
+      DeleteObjectIfExists(baseName + "_MID");
+
+   // ---- vertical accent marking where the range was formed -------------
+   if(RangeZoneShowLeftEdge)
+      SetPriceTrend(baseName + "_EDGE", leftTime, top, leftTime,
+                    bottom, RangeZoneAccentColor, STYLE_SOLID, 1);
+   else
+      DeleteObjectIfExists(baseName + "_EDGE");
+}
+
+//+------------------------------------------------------------------+
+//| Shift a chart time by a whole number of bars (period safe)       |
+//+------------------------------------------------------------------+
+datetime ShiftTimeByBars(const datetime base, const int bars)
+{
+   if(bars == 0) return(base);
+   return((datetime)(base + (long)bars * PeriodSeconds(_Period)));
 }
 
 void DrawBreakoutArrow(const datetime signalTime,
@@ -2579,10 +2683,107 @@ void DrawBreakoutArrow(const datetime signalTime,
 
    SetArrowObject(key + "_ARROW", signalTime, price,
                   direction > 0 ? 233 : 234, arrowColor, 2);
-   SetPriceText(key + "_TEXT", signalTime,
-                direction > 0 ? price - gap * 0.45 : price + gap * 0.45,
-                direction > 0 ? "RAW BUY BREAKOUT" : "RAW SELL BREAKOUT",
-                arrowColor, 8);
+
+   // The wording no longer sits next to the candles: it is moved into a
+   // raised card parked far from price and tied back with a dotted leader.
+   DeleteObjectIfExists(key + "_TEXT");
+   DrawAnnotationCard(key + "_CARD", signalTime, shift, direction,
+                      direction > 0 ? rangeTop : rangeBottom,
+                      direction > 0 ? "BUY BREAKOUT" : "SELL BREAKOUT",
+                      arrowColor, 0);
+}
+
+//+------------------------------------------------------------------+
+//| Raised annotation card, parked away from candles and linked to    |
+//| the range box with a dotted leader line.                          |
+//+------------------------------------------------------------------+
+void DrawAnnotationCard(const string base,
+                        const datetime anchorTime,
+                        const int shift,
+                        const int direction,
+                        const double anchorPrice,
+                        const string text,
+                        const color accent,
+                        const int tier)
+{
+   if(!ShowSignalCards || !ShowChartObjects || !VisualOutputAvailable())
+   {
+      DeleteObjectIfExists(base + "_SHADOW");
+      DeleteObjectIfExists(base + "_BODY");
+      DeleteObjectIfExists(base + "_BAR");
+      DeleteObjectIfExists(base + "_HI");
+      DeleteObjectIfExists(base + "_LEAD");
+      DeleteObjectIfExists(base + "_TEXT");
+      return;
+   }
+
+   double atr = iATR(NULL, 0, SignalATRPeriod, shift);
+   if(atr <= 0.0)
+      atr = MathMax(iHigh(NULL, 0, shift) - iLow(NULL, 0, shift),
+                    Point * 50);
+
+   double cardHeight = atr * SignalCardHeightATR;
+   if(cardHeight <= 0.0) cardHeight = Point * 100;
+
+   // Push the card well clear of the candle body, the arrows and the
+   // range box: measured from the extreme of the local swing, not the bar.
+   double extreme = anchorPrice;
+   int scanBars = 12;
+   for(int k = shift; k < shift + scanBars && k < Bars; k++)
+   {
+      if(direction > 0) extreme = MathMax(extreme, iHigh(NULL, 0, k));
+      else              extreme = MathMin(extreme, iLow(NULL, 0, k));
+   }
+
+   // Tier separates stacked annotations (breakout vs. outcome) so two
+   // cards generated one bar apart can never sit on top of each other.
+   double tierGap = (cardHeight + atr * 0.55) * (double)tier;
+   double distance = atr * SignalCardDistanceATR + tierGap;
+   double cardNear = direction > 0
+                     ? extreme + distance
+                     : extreme - distance;
+   double cardFar = direction > 0 ? cardNear + cardHeight
+                                  : cardNear - cardHeight;
+   double cardTop = MathMax(cardNear, cardFar);
+   double cardBottom = MathMin(cardNear, cardFar);
+   double cardMid = (cardTop + cardBottom) * 0.5;
+
+   int widthBars = SignalCardWidthBars;
+   if(widthBars < 4) widthBars = 4;
+   datetime cardLeft = ShiftTimeByBars(anchorTime, SignalCardOffsetBars);
+   datetime cardRight = ShiftTimeByBars(cardLeft, widthBars);
+   datetime cardCenter = ShiftTimeByBars(cardLeft, widthBars / 2);
+
+   color shadowCol = BlendColor(SignalCardShadowColor,
+                                ProBackgroundColor, 0.70);
+   color bodyCol = BlendColor(SignalCardBodyColor,
+                              ProBackgroundColor, 0.92);
+   color highlight = BlendColor(accent, SignalCardBodyColor, 0.45);
+   color leaderCol = BlendColor(accent, ProBackgroundColor, 0.55);
+
+   double shadowDrop = cardHeight * 0.12;
+   double barHeight = cardHeight * 0.16;
+
+   // shadow -> body -> accent bar -> top highlight = raised card look
+   SetPriceRectangle(base + "_SHADOW",
+                     ShiftTimeByBars(cardLeft, 1), cardTop - shadowDrop,
+                     ShiftTimeByBars(cardRight, 1), cardBottom - shadowDrop,
+                     shadowCol, true);
+   SetPriceRectangle(base + "_BODY", cardLeft, cardTop, cardRight,
+                     cardBottom, bodyCol, true);
+   SetPriceRectangle(base + "_BAR", cardLeft, cardBottom + barHeight,
+                     cardRight, cardBottom, accent, true);
+   SetPriceTrend(base + "_HI", cardLeft, cardTop, cardRight, cardTop,
+                 highlight, STYLE_SOLID, 1);
+
+   // dotted leader from the range box edge up/down to the card
+   SetPriceTrend(base + "_LEAD", anchorTime, anchorPrice,
+                 cardCenter, direction > 0 ? cardBottom : cardTop,
+                 leaderCol, STYLE_DOT, 1);
+
+   SetPriceText(base + "_TEXT", cardCenter, cardMid, text,
+                BlendColor(accent, ProForegroundColor, 0.35),
+                SignalCardFontSize);
 }
 
 void DrawOutcomeMarker(const datetime signalTime,
@@ -2609,10 +2810,13 @@ void DrawOutcomeMarker(const datetime signalTime,
 
    SetArrowObject(base + "_ICON", resultTime, price,
                   success ? 252 : 251, resultColor, 2);
-   SetPriceText(base + "_TEXT", resultTime,
-                direction > 0 ? price - gap * 0.42 : price + gap * 0.42,
-                success ? "RAW NEXT BAR UP/DOWN: MATCH" : "RAW NEXT BAR: MISS",
-                resultColor, 8);
+   DeleteObjectIfExists(base + "_TEXT");
+
+   // Result wording goes to its own raised card, offset further out than
+   // the breakout card so the two never collide.
+   DrawAnnotationCard(base + "_CARD", resultTime, resultShift, direction,
+                      price, success ? "NEXT BAR: MATCH" : "NEXT BAR: MISS",
+                      resultColor, 1);
 }
 
 void SetPriceRectangle(const string name,
@@ -3861,6 +4065,11 @@ void SetCardLabel(const string name,
 //+------------------------------------------------------------------+
 void DeleteLiveObjects()
 {
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_SHADOW");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_BEVEL_HI");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_BEVEL_LO");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_MID");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_EDGE");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_BODY");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_UP");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_DN");
@@ -3868,6 +4077,12 @@ void DeleteLiveObjects()
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_BOTTOM");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_SIGNAL_ARROW");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_SIGNAL_TEXT");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_SIGNAL_CARD_SHADOW");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_SIGNAL_CARD_BODY");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_SIGNAL_CARD_BAR");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_SIGNAL_CARD_HI");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_SIGNAL_CARD_LEAD");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_SIGNAL_CARD_TEXT");
 }
 
 void DeleteObjectIfExists(const string name)
