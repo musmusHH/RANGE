@@ -158,6 +158,7 @@ input int                    ResultCardGapPixels = 10;    // gap under range box
 input int                    ResultCardFontSize = 9;
 input double                 ResultCardCharWidthPx = 0.62; // width per pt of font
 input int                    ResultCardPadPixels = 10;
+input bool                   ResultCardsAvoidPanels = true; // hide under panels
 input int                    DashboardX = 12;
 input int                    DashboardY = 20;
 input bool                   ShowProfitTracker = true;
@@ -261,6 +262,12 @@ bool     g_forceVisualRefresh = false;
 //--- changes, which stops the per-tick delete/recreate flicker.
 string   g_resultCardSignature = "";
 string   g_resultCardTickets = "";
+//--- screen rectangles occupied by the two dashboards, published by the
+//--- panel painters so chart-layer objects can keep clear of them.
+int      g_panelLeftX1 = 0, g_panelLeftY1 = 0;
+int      g_panelLeftX2 = 0, g_panelLeftY2 = 0;
+int      g_panelRightX1 = 0, g_panelRightY1 = 0;
+int      g_panelRightX2 = 0, g_panelRightY2 = 0;
 
 //---- Active selectable panel style
 color    g_styleMainHeader = C'0,140,255';
@@ -3447,7 +3454,11 @@ void DrawClosedTradeResultCards()
                       + IntegerToString(font) + "|"
                       + IntegerToString(gap) + "|"
                       + IntegerToString(pad) + "|"
-                      + IntegerToString(g_rangeLogCount);
+                      + IntegerToString(g_rangeLogCount) + "|"
+                      + IntegerToString(g_panelLeftX2) + "|"
+                      + IntegerToString(g_panelLeftY2) + "|"
+                      + IntegerToString(g_panelRightX1) + "|"
+                      + IntegerToString(g_panelRightY2);
    if(signature == g_resultCardSignature)
       return;
    g_resultCardSignature = signature;
@@ -3536,6 +3547,29 @@ void DrawClosedTradeResultCards()
          if(!hit) break;
       }
 
+      // Chart-layer objects always paint over screen panels, so a card
+      // that would sit beneath a dashboard is not drawn at all.
+      if(ResultCardsAvoidPanels &&
+         (RectanglesIntersect(leftPx, topPx, rightPx, topPx + cardPxH,
+                              g_panelLeftX1, g_panelLeftY1,
+                              g_panelLeftX2, g_panelLeftY2) ||
+          RectanglesIntersect(leftPx, topPx, rightPx, topPx + cardPxH,
+                              g_panelRightX1, g_panelRightY1,
+                              g_panelRightX2, g_panelRightY2)))
+      {
+         DeleteObjectIfExists(cardPrefix + IntegerToString(OrderTicket())
+                              + "_BODY");
+         DeleteObjectIfExists(cardPrefix + IntegerToString(OrderTicket())
+                              + "_HEAD");
+         DeleteObjectIfExists(cardPrefix + IntegerToString(OrderTicket())
+                              + "_TITLE");
+         DeleteObjectIfExists(cardPrefix + IntegerToString(OrderTicket())
+                              + "_DETAIL");
+         DeleteObjectIfExists(cardPrefix + IntegerToString(OrderTicket())
+                              + "_DOT");
+         continue;
+      }
+
       ArrayResize(usedL, placedCount + 1);
       ArrayResize(usedT, placedCount + 1);
       ArrayResize(usedR, placedCount + 1);
@@ -3594,6 +3628,19 @@ void DrawClosedTradeResultCards()
       }
       g_resultCardTickets = activeTickets;
    }
+}
+
+// Axis-aligned rectangle intersection in screen pixels. A zero-area
+// rectangle (an inactive panel) never intersects.
+bool RectanglesIntersect(const int ax1, const int ay1,
+                         const int ax2, const int ay2,
+                         const int bx1, const int by1,
+                         const int bx2, const int by2)
+{
+   if(bx2 <= bx1 || by2 <= by1) return(false);
+   if(ax2 <= bx1 || ax1 >= bx2) return(false);
+   if(ay2 <= by1 || ay1 >= by2) return(false);
+   return(true);
 }
 
 // Pixels per price unit and pixels per bar for the current view.
@@ -4380,6 +4427,11 @@ void DrawBentoMainPanel()
                       W + 12, 556, BentoShell,
                       BlendColor(accA, BentoShell, 0.35), 0);
 
+   g_panelLeftX1 = x - 6;
+   g_panelLeftY1 = y - 6;
+   g_panelLeftX2 = x - 6 + W + 12;
+   g_panelLeftY2 = y - 6 + 556;
+
    double floating = FloatingEAProfit();
    double equity = AccountEquity();
    double balance = AccountBalance();
@@ -4625,6 +4677,8 @@ void DrawBentoPerformancePanel()
    if(chartW < W + margin + 20)
    {
       DeleteObjectsWithPrefix(g_objectPrefix + "BP_");
+      g_panelRightX1 = 0; g_panelRightY1 = 0;
+      g_panelRightX2 = 0; g_panelRightY2 = 0;
       g_lastTrackerHistoryCount = -1;
       return;
    }
@@ -4632,6 +4686,8 @@ void DrawBentoPerformancePanel()
    if(ShowEAStatus && x < DashboardX + 410)
    {
       DeleteObjectsWithPrefix(g_objectPrefix + "BP_");
+      g_panelRightX1 = 0; g_panelRightY1 = 0;
+      g_panelRightX2 = 0; g_panelRightY2 = 0;
       g_lastTrackerHistoryCount = -1;
       return;
    }
@@ -4658,6 +4714,11 @@ void DrawBentoPerformancePanel()
    SetScreenRectangle(g_objectPrefix + "BP_SHELL", x - 6, y - 6,
                       W + 12, shellH, BentoShell,
                       BlendColor(accA, BentoShell, 0.35), 0);
+
+   g_panelRightX1 = x - 6;
+   g_panelRightY1 = y - 6;
+   g_panelRightX2 = x - 6 + W + 12;
+   g_panelRightY2 = y - 6 + shellH;
 
    //--- header tile ----------------------------------------------------
    BentoPerfTile("H", x, y, W, headH, accA);
