@@ -3434,6 +3434,11 @@ void DrawClosedTradeResultCards()
    ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0, firstVisible);
    ChartGetInteger(0, CHART_VISIBLE_BARS, 0, visibleBars);
 
+   int fvBar = (int)firstVisible;
+   if(fvBar < 0) fvBar = 0;
+   if(fvBar > Bars - 1) fvBar = Bars - 1;
+   datetime firstVisibleTime = iTime(NULL, 0, fvBar);
+
    string signature = IntegerToString(OrdersHistoryTotal()) + "|"
                       + DoubleToString(priceMin, Digits) + "|"
                       + DoubleToString(priceMax, Digits) + "|"
@@ -3450,6 +3455,11 @@ void DrawClosedTradeResultCards()
    // Objects are reused in place by the Set* helpers, so only the
    // tickets that no longer qualify get removed.
    string activeTickets = "";
+
+   // Occupied rectangles in pixel space, used to push overlapping cards
+   // down until each one clears the others by ResultCardGapPixels.
+   int usedL[], usedT[], usedR[], usedB[];
+   int placedCount = 0;
 
    for(int i = OrdersHistoryTotal() - 1; i >= 0; i--)
    {
@@ -3487,20 +3497,58 @@ void DrawClosedTradeResultCards()
 
       // --- anchor: bottom of the owning range box ------------------
       double boxBottom = 0.0;
-      double topPrice;
+      double anchorPrice;
       if(RangeBottomAt(OrderCloseTime(), boxBottom))
-         topPrice = boxBottom - gap / pxPerPrice;
+         anchorPrice = boxBottom;
       else
-      {
-         double lowRef = OrderClosePrice();
-         topPrice = lowRef - gap / pxPerPrice;
-      }
-      double bottomPrice = topPrice - cardPxH / pxPerPrice;
+         anchorPrice = OrderClosePrice();
 
       datetime leftTime = OrderCloseTime();
       datetime rightTime = (datetime)(leftTime
                              + (long)MathCeil((double)cardPx
                                / MathMax(pxPerBar, 1)) * barSeconds);
+
+      // Work in pixels for collision testing: y grows downward, so the
+      // card top is 'gap' pixels BELOW the anchor.
+      int anchorPx = (int)MathRound((priceMax - anchorPrice) * pxPerPrice);
+      int leftPx = (int)MathRound((double)(leftTime - firstVisibleTime)
+                                  / barSeconds * pxPerBar);
+      int rightPx = leftPx + cardPx;
+      int topPx = anchorPx + gap;
+
+      // Slide the card downward while it collides with an already
+      // placed card, always preserving a 'gap' pixel separation.
+      for(int guard = 0; guard < 40; guard++)
+      {
+         bool hit = false;
+         for(int u = 0; u < placedCount; u++)
+         {
+            if(leftPx   < usedR[u] + gap &&
+               rightPx  > usedL[u] - gap &&
+               topPx    < usedB[u] + gap &&
+               topPx + cardPxH > usedT[u] - gap)
+            {
+               topPx = usedB[u] + gap;
+               hit = true;
+               break;
+            }
+         }
+         if(!hit) break;
+      }
+
+      ArrayResize(usedL, placedCount + 1);
+      ArrayResize(usedT, placedCount + 1);
+      ArrayResize(usedR, placedCount + 1);
+      ArrayResize(usedB, placedCount + 1);
+      usedL[placedCount] = leftPx;
+      usedT[placedCount] = topPx;
+      usedR[placedCount] = rightPx;
+      usedB[placedCount] = topPx + cardPxH;
+      placedCount++;
+
+      // Back to price coordinates for the actual objects.
+      double topPrice = priceMax - topPx / pxPerPrice;
+      double bottomPrice = topPrice - cardPxH / pxPerPrice;
 
       color cardColor = netResult >= 0.0
                         ? g_styleWinCard : g_styleLossCard;
