@@ -1,0 +1,3973 @@
+//+------------------------------------------------------------------+
+//|                    Range Breakout Signals EA.mq4                 |
+//| Standalone MT4 EA based on the supplied Range Breakout script    |
+//|                                                                  |
+//| Distributed under the Mozilla Public License 2.0:                |
+//| https://mozilla.org/MPL/2.0/                                     |
+//+------------------------------------------------------------------+
+#property strict
+#property version   "3.10"
+#property description "Standalone Range Breakout Signals EA - quality gates and HUD"
+#property description "No iCustom dependency; optimized for MT4 Strategy Tester"
+
+//---- User-selectable modes
+enum ENUM_RBS_ENTRY_TIMING
+{
+   ENTRY_AFTER_BAR_CLOSE = 0, // confirmed signal after candle closes
+   ENTRY_IMMEDIATELY     = 1, // enter when intrabar arrow appears
+   ENTRY_BOTH            = 2  // intrabar arrow, or confirmed close if not entered
+};
+
+enum ENUM_RBS_SIGNAL_MODE
+{
+   TRADE_ALL_BREAKOUTS    = 0,
+   TRADE_VOLUME_CONFIRMED = 1
+};
+
+enum ENUM_RBS_EXIT_METHOD
+{
+   EXIT_RANGE_RISK_REWARD = 0,
+   EXIT_ATR_RISK_REWARD   = 1,
+   EXIT_FIXED_POINTS      = 2,
+   EXIT_OPPOSITE_SIGNAL   = 3
+};
+
+enum ENUM_RBS_LOT_MODE
+{
+   LOT_FIXED                 = 0,
+   LOT_RISK_PERCENT          = 1,
+   LOT_BALANCE_STEP_NOMINAL  = 2
+};
+
+enum ENUM_RBS_PANEL_STYLE
+{
+   PANEL_NEON_COMMAND       = 0,
+   PANEL_ROYAL_AURORA       = 1,
+   PANEL_EMERALD_MATRIX     = 2,
+   PANEL_CRIMSON_TACTICAL   = 3,
+   PANEL_ARCTIC_GLASS       = 4,
+   PANEL_AMBER_INDUSTRIAL   = 5,
+   PANEL_ICE_FINTECH        = 6,
+   PANEL_BLACK_GOLD         = 7,
+   PANEL_SPECTRUM_MODULAR   = 8,
+   PANEL_MONO_MINT          = 9
+};
+
+//---- Internal indicator/signal settings
+input int                    SignalRangeLength = 20;
+input int                    SignalConfirmationLength = 5;
+input ENUM_TIMEFRAMES        SignalLowerTimeframe = PERIOD_M5;
+input double                 SignalVolatilityThreshold = 1.20;
+input int                    SignalATRPeriod = 14;
+input double                 SignalATRMultiplier = 1.20;
+input int                    SignalHistoryBars = 5000;
+input ENUM_RBS_SIGNAL_MODE   SignalMode = TRADE_ALL_BREAKOUTS;
+input ENUM_RBS_ENTRY_TIMING  EntryTiming = ENTRY_AFTER_BAR_CLOSE;
+input bool                   TradeSignalOnStartup = false;
+
+//---- Breakout quality gates (starting values, NOT optimized results)
+input bool                   EnableQualityFilter = false;
+input bool                   RequireClosedSignalBar = false;
+input bool                   EnableTrendFilter = false;
+// Session-only override: disables quality, trend, ADX, volume and spread/ATR
+// entry gates even when an old Strategy Tester .set file enables them.
+input bool                   ForceSessionOnlyMode = true;
+input ENUM_TIMEFRAMES        TrendTimeframe = PERIOD_M15;
+input int                    TrendFastEMA = 50;
+input int                    TrendSlowEMA = 200;
+input bool                   EnableADXFilter = true;
+input int                    FilterADXPeriod = 14;
+input double                 MinimumADX = 22.0;
+input double                 MinimumBodyFraction = 0.55;
+input double                 MaximumRejectionWickFraction = 0.25;
+input double                 BreakoutBufferATR = 0.10;
+input double                 MaximumBreakoutExtensionATR = 0.80;
+input double                 MaximumSignalRangeATR = 2.50;
+input double                 MaximumSpreadATR = 0.08; // 0 = disabled
+input bool                   EnableSessionFilter = false;
+input int                    SessionStartHour = 7;  // broker SERVER time
+input int                    SessionEndHour = 20;   // exclusive; overnight supported
+input double                 EstimatedRoundTurnCommissionPerLot = 0.0; // account currency; verify broker
+
+//---- Exit settings
+input ENUM_RBS_EXIT_METHOD   ExitMethod = EXIT_RANGE_RISK_REWARD;
+input double                 RiskRewardRatio = 2.0;
+input double                 ATRStopMultiplier = 1.50;
+input int                    FixedStopLossPoints = 300;
+input int                    FixedTakeProfitPoints = 600;
+input int                    RangeStopBufferPoints = 20;
+input bool                   CloseOnOppositeSignal = true;
+input bool                   OpenReverseTrade = true;
+
+//---- Position sizing and exposure
+input ENUM_RBS_LOT_MODE      LotSizingMode = LOT_FIXED;
+input double                 FixedLots = 0.01;
+input double                 RiskPercent = 0.50;
+input bool                   EnforceFixedLotRiskAsActualStop = true;
+// Safety override for small XAUUSD tester accounts. When enabled, old .set
+// files cannot switch the EA back to risk-budget lot skipping.
+input bool                   ForceFixedLotTradeMode = true;
+input double                 ForcedTradeLots = 0.01;
+input double                 ForcedTradeRiskPercent = 0.50;
+input double                 StepStartingBalance = 100.0;
+input double                 StepStartingLot = 0.01;
+input double                 BalanceProfitStep = 150.0;
+input double                 LotIncrementPerStep = 0.01;
+input double                 NominalRiskPer001Lot = 1.50;
+input bool                   EnforceTierRiskAsActualStop = true;
+input bool                   SkipIfExactRiskStopIsTooClose = false;
+input int                    RiskReferencePointsWithoutSL = 300;
+input int                    MaxOpenPositions = 1;
+input bool                   AllowBuyTrades = true;
+input bool                   AllowSellTrades = true;
+
+//---- Daily loss protection (broker day, EA MagicNumber)
+input bool                   EnableDailyLossLimit = true;
+input double                 MaximumDailyLossPercent = 5.0;
+input bool                   CloseAllEATradesAtDailyLimit = true;
+
+//---- Execution filters
+input int                    MagicNumber = 260910;
+input string                 TradeComment = "RBS EA";
+input int                    SlippagePoints = 30;
+input int                    MaximumSpreadPoints = 270; // broker points; 0 = disabled
+input bool                   EnableTrailingStop = true;
+input int                    TrailingStartPoints = 700;
+input int                    TrailingDistancePoints = 100;
+input int                    TrailingStepPoints = 100;
+input bool                   AdjustStopsToBrokerMinimum = true;
+input bool                   CloseTradeIfECNStopModifyFails = true;
+
+//---- Professional chart visuals and analysis dashboard
+input bool                   ShowChartObjects = true;
+input int                    VisualHistoryBars = 5000;
+input int                    AnalysisMonths = 3;
+input bool                   EnsureFullAnalysisWindow = true;
+input int                    AnalysisWarmupBars = 500;
+input bool                   ShowOutcomeMarkers = true;
+input bool                   ShowEAStatus = true; // dashboard cards
+input bool                   UseFuturisticDashboard = true;
+input bool                   ApplyProfessionalChartTheme = true;
+input ENUM_RBS_PANEL_STYLE   PanelStyle = PANEL_NEON_COMMAND;
+input bool                   RememberPanelStyleSelection = true;
+input bool                   ShowClosedTradeResultCards = true;
+input int                    ClosedTradeCardWidth = 150;
+input int                    ClosedTradeCardHeight = 42;
+input int                    ClosedTradeCardOffsetY = 12;
+input int                    DashboardX = 12;
+input int                    DashboardY = 20;
+input bool                   ShowProfitTracker = true;
+input int                    ProfitTrackerDays = 30;
+input bool                   TrackerAllSymbolsWithMagic = true;
+input int                    ProfitTrackerRightMargin = 10; // X: pixels from right edge
+input int                    ProfitTrackerY = 10;           // Y: pixels from top
+input int                    ProfitTrackerHeaderHeight = 50;
+input int                    ProfitTrackerFontSize = 8;
+input color                  ProBackgroundColor = C'11,17,29';
+input color                  ProForegroundColor = C'218,226,240';
+input color                  ProGridColor = C'31,43,62';
+input color                  ProBullColor = C'0,230,175';
+input color                  ProBearColor = C'255,75,92';
+input color                  MainHeaderColor = C'45,105,255';
+input color                  ResultsHeaderColor = C'144,75,255';
+input color                  SuccessColor = C'0,225,130';
+input color                  FailureColor = C'255,72,82';
+
+//---- Committed range state (state after the latest completed candle)
+bool     g_rangeActive = false;
+double   g_rangeTop = 0.0;
+double   g_rangeBottom = 0.0;
+datetime g_rangeCreatedTime = 0;
+string   g_activeRangeObjectBase = "";
+
+//---- Next-candle outcome tracking and rolling analysis
+datetime g_pendingSignalTime = 0;
+int      g_pendingDirection = 0;
+datetime g_analysisStart = 0;
+datetime g_analysisEnd = 0;
+bool     g_fullAnalysisCoverage = false;
+datetime g_outcomeSignalTime[];
+int      g_outcomeDirection[];
+int      g_outcomeSuccess[];
+int      g_totalOutcomes = 0;
+int      g_successfulOutcomes = 0;
+int      g_failedOutcomes = 0;
+int      g_bullishOutcomes = 0;
+int      g_bullishSuccesses = 0;
+int      g_bearishOutcomes = 0;
+int      g_bearishSuccesses = 0;
+
+//---- Runtime state
+string   g_objectPrefix = "RBS_EA2_";
+datetime g_currentChartBar = 0;
+datetime g_suppressIntrabarUntilNextBar = 0;
+datetime g_lastHandledBullSignal = 0;
+datetime g_lastHandledBearSignal = 0;
+bool     g_engineInitialized = false;
+int      g_dailyDayKey = -1;
+datetime g_dailyStartTime = 0;
+double   g_dailyStartBalance = 0.0;
+double   g_dailyClosedProfit = 0.0;
+double   g_dailyFloatingProfit = 0.0;
+double   g_dailyNetResult = 0.0;
+bool     g_dailyLossBlocked = false;
+int      g_dailyHistoryCount = -1;
+datetime g_lastDashboardUpdate = 0;
+string   g_lastDashboardStatus = "";
+int      g_lastTrackerHistoryCount = -1;
+int      g_lastTrackerDayKey = -1;
+int      g_lastResultCardHistoryCount = -1;
+string   g_status = "Initializing";
+string   g_qualityStatus = "Waiting for a breakout";
+datetime g_lastEntryDiagnosticSignal = 0;
+string   g_lastEntryDiagnosticReason = "";
+bool     g_qualityPassed = false;
+bool     g_entriesPaused = false; // session-local; exits and trailing remain active
+int      g_dashboardTab = 0;
+
+//---- Active selectable panel style
+color    g_styleMainHeader = C'0,140,255';
+color    g_styleAccount = C'255,145,0';
+color    g_styleRisk = C'170,35,185';
+color    g_styleSignal = C'0,180,85';
+color    g_styleFilter = C'230,0,100';
+color    g_styleEquity = C'0,180,230';
+color    g_styleResult = C'0,105,220';
+color    g_styleTrackerHeader = C'0,135,230';
+color    g_styleTableHeader = C'255,155,0';
+color    g_styleTotal = C'0,110,190';
+color    g_styleAnalysis = C'165,35,180';
+color    g_styleAnalysisColumns = C'0,190,90';
+color    g_styleBody = C'18,29,46';
+color    g_styleBorder = C'55,83,118';
+color    g_styleText = C'225,236,250';
+color    g_styleLabel = C'110,210,255';
+color    g_styleHeaderText = clrWhite;
+color    g_styleTableText = clrBlack;
+color    g_styleWinCard = C'0,105,210';
+color    g_styleLossCard = C'185,24,52';
+string   g_styleFont = "Arial";
+string   g_styleBoldFont = "Arial Bold";
+string   g_styleMonoFont = "Consolas";
+string   g_styleMonoBoldFont = "Consolas Bold";
+int      g_styleSectionMode = 0;
+int      g_activePanelStyle = 0;
+string   g_panelStyleMemoryKey = "";
+
+//+------------------------------------------------------------------+
+//| Initialization                                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   if(EnableQualityFilter && RequireClosedSignalBar &&
+      EntryTiming != ENTRY_AFTER_BAR_CLOSE)
+   {
+      Print("RBS EA: closed-bar quality filter requires EntryTiming=ENTRY_AFTER_BAR_CLOSE.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(TrendFastEMA < 1 || TrendSlowEMA <= TrendFastEMA ||
+      FilterADXPeriod < 1 || MinimumADX < 0.0 || MinimumADX > 100.0 ||
+      MinimumBodyFraction < 0.0 || MinimumBodyFraction > 1.0 ||
+      MaximumRejectionWickFraction < 0.0 || MaximumRejectionWickFraction > 1.0 ||
+      BreakoutBufferATR < 0.0 || MaximumBreakoutExtensionATR <= BreakoutBufferATR ||
+      MaximumSignalRangeATR <= 0.0 || MaximumSpreadATR < 0.0 ||
+      EstimatedRoundTurnCommissionPerLot < 0.0 ||
+      SessionStartHour < 0 || SessionStartHour > 23 ||
+      SessionEndHour < 0 || SessionEndHour > 23 ||
+      (EnableSessionFilter && SessionStartHour == SessionEndHour))
+   {
+      Print("RBS EA: invalid quality, session or commission setting.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(SignalRangeLength < 1 || SignalConfirmationLength < 0 ||
+      SignalATRPeriod < 1)
+   {
+      Print("RBS EA: invalid signal length setting.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(SignalHistoryBars < 100)
+   {
+      Print("RBS EA: SignalHistoryBars must be at least 100.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(MaxOpenPositions < 1)
+   {
+      Print("RBS EA: MaxOpenPositions must be at least 1.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(LotSizingMode == LOT_FIXED && FixedLots <= 0.0)
+   {
+      Print("RBS EA: FixedLots must be greater than zero.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if((LotSizingMode == LOT_RISK_PERCENT ||
+       (LotSizingMode == LOT_FIXED && EnforceFixedLotRiskAsActualStop)) &&
+      RiskPercent <= 0.0)
+   {
+      Print("RBS EA: RiskPercent must be greater than zero.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(LotSizingMode == LOT_BALANCE_STEP_NOMINAL &&
+      (StepStartingBalance <= 0.0 || StepStartingLot <= 0.0 ||
+       BalanceProfitStep <= 0.0 || LotIncrementPerStep <= 0.0 ||
+       NominalRiskPer001Lot <= 0.0))
+   {
+      Print("RBS EA: balance-step lot/risk settings must be positive.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(EnableDailyLossLimit && MaximumDailyLossPercent <= 0.0)
+   {
+      Print("RBS EA: MaximumDailyLossPercent must be positive.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(ShowProfitTracker && (ProfitTrackerDays < 1 || ProfitTrackerDays > 60))
+   {
+      Print("RBS EA: ProfitTrackerDays must be between 1 and 60.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(ShowProfitTracker &&
+      (ProfitTrackerHeaderHeight < 30 || ProfitTrackerHeaderHeight > 80 ||
+       ProfitTrackerFontSize < 7 || ProfitTrackerFontSize > 12))
+   {
+      Print("RBS EA: tracker header must be 30-80 px and font 7-12.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(ShowClosedTradeResultCards &&
+      (ClosedTradeCardWidth < 110 || ClosedTradeCardWidth > 260 ||
+       ClosedTradeCardHeight < 34 || ClosedTradeCardHeight > 80))
+   {
+      Print("RBS EA: trade-result card width must be 110-260 and height 34-80.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(EnableTrailingStop &&
+      (TrailingStartPoints < 1 || TrailingDistancePoints < 1 ||
+       TrailingStepPoints < 1))
+   {
+      Print("RBS EA: trailing start, distance and step must be positive.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+
+   long chartPart = ChartID() % 1000000;
+   g_objectPrefix = "RBS2_" + IntegerToString((int)chartPart) + "_";
+   DeleteEAObjects();
+
+   g_activePanelStyle = (int)PanelStyle;
+   g_panelStyleMemoryKey = "RBS_STYLE_"
+                           + IntegerToString(AccountNumber()) + "_"
+                           + IntegerToString(MagicNumber) + "_"
+                           + Symbol() + "_" + IntegerToString(Period());
+   if(RememberPanelStyleSelection &&
+      GlobalVariableCheck(g_panelStyleMemoryKey))
+   {
+      int rememberedStyle = (int)GlobalVariableGet(g_panelStyleMemoryKey);
+      if(rememberedStyle >= 0 && rememberedStyle <= 9)
+         g_activePanelStyle = rememberedStyle;
+   }
+   ConfigurePanelStyle();
+   if(ApplyProfessionalChartTheme)
+      ApplyProChartTheme();
+
+   g_engineInitialized = false;
+   g_currentChartBar = 0;
+   InitializeDailyRiskState();
+   if(ForceSessionOnlyMode)
+      Print("RBS EA: SESSION-ONLY MODE active | quality/trend/ADX/volume/spread entry gates disabled.");
+   if(ForceFixedLotTradeMode)
+      Print("RBS EA: FORCED TRADE MODE active | lots=",
+            DoubleToString(ForcedTradeLots, LotDigits()),
+            " | risk=", DoubleToString(ForcedTradeRiskPercent, 2),
+            "% | legacy risk-budget skipping disabled.");
+   g_status = "Waiting to initialize signal history";
+   UpdateStatusDisplay();
+   return(INIT_SUCCEEDED);
+}
+
+void OnDeinit(const int reason)
+{
+   DeleteEAObjects();
+   if(ShowEAStatus)
+      Comment("");
+   ChartRedraw(0);
+}
+
+void OnChartEvent(const int id,
+                  const long &lparam,
+                  const double &dparam,
+                  const string &sparam)
+{
+   if(id == CHARTEVENT_OBJECT_CLICK)
+   {
+      if(sparam == g_objectPrefix + "FUT_PAUSE" ||
+         sparam == g_objectPrefix + "FUT_TAB0" ||
+         sparam == g_objectPrefix + "FUT_TAB1" ||
+         sparam == g_objectPrefix + "FUT_TAB2")
+      {
+         if(sparam == g_objectPrefix + "FUT_PAUSE")
+            g_entriesPaused = !g_entriesPaused;
+         else if(sparam == g_objectPrefix + "FUT_TAB0") g_dashboardTab = 0;
+         else if(sparam == g_objectPrefix + "FUT_TAB1") g_dashboardTab = 1;
+         else g_dashboardTab = 2;
+         DeleteObjectsWithPrefix(g_objectPrefix + "FUT_");
+         g_lastDashboardUpdate = 0;
+         UpdateStatusDisplay();
+         ChartRedraw(0);
+         return;
+      }
+      if(sparam == g_objectPrefix + "STYLE_PREV")
+      {
+         ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+         ChangePanelStyle(-1);
+         return;
+      }
+      if(sparam == g_objectPrefix + "STYLE_NEXT")
+      {
+         ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+         ChangePanelStyle(1);
+         return;
+      }
+   }
+
+   if(id == CHARTEVENT_CHART_CHANGE)
+   {
+      g_lastTrackerHistoryCount = -1;
+      g_lastResultCardHistoryCount = -1;
+      g_lastDashboardUpdate = 0;
+      g_lastDashboardStatus = "";
+      UpdateStatusDisplay();
+      ChartRedraw(0);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Main tick                                                        |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   UpdateDailyLossProtection();
+   ManageTrailingStops();
+
+   int minimumBars = SignalRangeLength + SignalConfirmationLength
+                     + SignalATRPeriod + 20;
+   if(Bars < minimumBars)
+   {
+      g_status = "Waiting for sufficient chart history";
+      UpdateStatusDisplay();
+      return;
+   }
+
+   if(!g_engineInitialized)
+   {
+      int startupDirection = 0;
+      double startupTop = 0.0;
+      double startupBottom = 0.0;
+      bool startupVolumeAligned = false;
+      datetime startupSignalTime = 0;
+
+      if(!InitializeSignalEngine(startupDirection, startupTop, startupBottom,
+                                 startupVolumeAligned, startupSignalTime))
+      {
+         g_status = "Signal engine initialization failed";
+         UpdateStatusDisplay();
+         return;
+      }
+
+      g_currentChartBar = iTime(NULL, 0, 0);
+      g_engineInitialized = true;
+
+      if(TradeSignalOnStartup && EntryTiming == ENTRY_AFTER_BAR_CLOSE &&
+         startupDirection != 0)
+      {
+         HandleSignal(startupDirection, startupSignalTime, 1,
+                      startupTop, startupBottom, startupVolumeAligned);
+      }
+      else if(!TradeSignalOnStartup &&
+              (EntryTiming == ENTRY_IMMEDIATELY ||
+               EntryTiming == ENTRY_BOTH))
+      {
+         // Do not enter an already-existing intrabar signal immediately
+         // after attaching the EA. Start monitoring from the next candle.
+         g_suppressIntrabarUntilNextBar = g_currentChartBar;
+      }
+
+      if(!TradeSignalOnStartup)
+      {
+         g_status = "Initialized; waiting for a new signal";
+         UpdateStatusDisplay();
+         return;
+      }
+   }
+
+   datetime chartBar = iTime(NULL, 0, 0);
+   bool newBar = (chartBar != g_currentChartBar);
+
+   if(newBar)
+   {
+      g_currentChartBar = chartBar;
+      g_suppressIntrabarUntilNextBar = 0;
+      g_lastResultCardHistoryCount = -1;
+      DeleteLiveObjects();
+
+      // The newly completed bar is the result candle for any breakout
+      // that was pending from the preceding completed candle.
+      EvaluatePendingOutcome(1);
+
+      int direction = 0;
+      double breakoutTop = 0.0;
+      double breakoutBottom = 0.0;
+      bool volumeAligned = false;
+
+      // Commit the candle that has just closed. This advances the internal
+      // range state once per bar and avoids the old iCustom full-history scan.
+      ProcessCommittedBar(1, direction, breakoutTop, breakoutBottom,
+                          volumeAligned);
+
+      if(direction != 0)
+      {
+         g_pendingSignalTime = iTime(NULL, 0, 1);
+         g_pendingDirection = direction;
+      }
+
+      if((EntryTiming == ENTRY_AFTER_BAR_CLOSE ||
+          EntryTiming == ENTRY_BOTH) && direction != 0)
+      {
+         HandleSignal(direction, iTime(NULL, 0, 1), 1,
+                      breakoutTop, breakoutBottom, volumeAligned);
+      }
+   }
+
+   if((EntryTiming == ENTRY_IMMEDIATELY ||
+       EntryTiming == ENTRY_BOTH) &&
+      g_suppressIntrabarUntilNextBar != chartBar)
+   {
+      EvaluateCurrentIntrabar();
+   }
+   else if(ShowChartObjects && g_rangeActive)
+   {
+      DrawRangeZone(g_activeRangeObjectBase, g_rangeCreatedTime,
+                    iTime(NULL, 0, 0), g_rangeTop, g_rangeBottom);
+   }
+
+   UpdateStatusDisplay();
+   ChartRedraw(0);
+}
+
+//+------------------------------------------------------------------+
+//| One-time historical state reconstruction                         |
+//+------------------------------------------------------------------+
+bool InitializeSignalEngine(int &lastDirection,
+                            double &lastTop,
+                            double &lastBottom,
+                            bool &lastVolumeAligned,
+                            datetime &lastSignalTime)
+{
+   g_rangeActive = false;
+   g_rangeTop = 0.0;
+   g_rangeBottom = 0.0;
+   g_rangeCreatedTime = 0;
+   g_activeRangeObjectBase = "";
+   g_pendingSignalTime = 0;
+   g_pendingDirection = 0;
+   ArrayResize(g_outcomeSignalTime, 0);
+   ArrayResize(g_outcomeDirection, 0);
+   ArrayResize(g_outcomeSuccess, 0);
+
+   int months = AnalysisMonths;
+   if(months < 1) months = 1;
+   g_analysisEnd = TimeCurrent();
+   g_analysisStart = SubtractCalendarMonths(g_analysisEnd, months);
+
+   lastDirection = 0;
+   lastTop = 0.0;
+   lastBottom = 0.0;
+   lastVolumeAligned = false;
+   lastSignalTime = 0;
+
+   int tail = SignalConfirmationLength;
+   if(tail < 1) tail = 1;
+   int lookback = SignalRangeLength;
+   if(SignalATRPeriod > lookback) lookback = SignalATRPeriod;
+
+   int oldestAvailable = Bars - lookback - tail - 1;
+   if(oldestAvailable < 2)
+      return(false);
+
+   int oldest = oldestAvailable;
+   if(SignalHistoryBars > 0 && oldest > SignalHistoryBars - 1)
+      oldest = SignalHistoryBars - 1;
+
+   if(EnsureFullAnalysisWindow)
+   {
+      int analysisShift = iBarShift(NULL, 0, g_analysisStart, false);
+      if(analysisShift < 0) analysisShift = Bars - 1;
+      int warmup = AnalysisWarmupBars;
+      if(warmup < 0) warmup = 0;
+      int requiredOldest = analysisShift + warmup;
+      if(requiredOldest > oldestAvailable) requiredOldest = oldestAvailable;
+      if(oldest < requiredOldest) oldest = requiredOldest;
+   }
+
+   g_fullAnalysisCoverage = (iTime(NULL, 0, oldest) <= g_analysisStart);
+
+   int needed = oldest + tail;
+   double volatility[];
+   ArrayResize(volatility, needed + 1);
+   ArraySetAsSeries(volatility, true);
+
+   for(int k = needed; k >= 0; k--)
+      volatility[k] = CalculateVolatility(k);
+
+   for(int i = oldest; i >= 1; i--)
+   {
+      bool zoneCondition = false;
+      if(!g_rangeActive)
+      {
+         bool underNow = (volatility[i] < SignalVolatilityThreshold);
+         zoneCondition = (underNow &&
+                          volatility[i + 1] >= SignalVolatilityThreshold &&
+                          volatility[i + SignalConfirmationLength]
+                             < SignalVolatilityThreshold);
+      }
+
+      int direction = 0;
+      double top = 0.0;
+      double bottom = 0.0;
+      bool aligned = false;
+      ProcessRangeBar(i, zoneCondition, direction, top, bottom, aligned);
+
+      if(direction != 0)
+      {
+         if(i >= 2)
+            RecordHistoricalOutcome(i, direction);
+         else
+         {
+            g_pendingSignalTime = iTime(NULL, 0, 1);
+            g_pendingDirection = direction;
+         }
+      }
+
+      if(i == 1 && direction != 0)
+      {
+         lastDirection = direction;
+         lastTop = top;
+         lastBottom = bottom;
+         lastVolumeAligned = aligned;
+         lastSignalTime = iTime(NULL, 0, 1);
+      }
+   }
+
+   RecalculateOutcomeStatistics();
+   Print("RBS EA: standalone signal engine initialized using ",
+         oldest, " historical bars. Outcomes in analysis window: ",
+         g_totalOutcomes, ".");
+   return(true);
+}
+
+//+------------------------------------------------------------------+
+//| Advance committed state using a completed chart candle           |
+//+------------------------------------------------------------------+
+void ProcessCommittedBar(const int shift,
+                         int &direction,
+                         double &breakoutTop,
+                         double &breakoutBottom,
+                         bool &volumeAligned)
+{
+   bool zoneCondition = false;
+   if(!g_rangeActive)
+      zoneCondition = IsZoneCondition(shift);
+
+   ProcessRangeBar(shift, zoneCondition, direction,
+                   breakoutTop, breakoutBottom, volumeAligned);
+}
+
+//+------------------------------------------------------------------+
+//| Pine state transition for one bar                                |
+//+------------------------------------------------------------------+
+void ProcessRangeBar(const int shift,
+                     const bool zoneCondition,
+                     int &direction,
+                     double &breakoutTop,
+                     double &breakoutBottom,
+                     bool &volumeAligned)
+{
+   direction = 0;
+   breakoutTop = 0.0;
+   breakoutBottom = 0.0;
+   volumeAligned = false;
+
+   if(zoneCondition && !g_rangeActive)
+   {
+      double vrange = iATR(NULL, 0, SignalATRPeriod, shift)
+                      * SignalATRMultiplier;
+      double center = iClose(NULL, 0, shift);
+      g_rangeTop = center + vrange;
+      g_rangeBottom = center - vrange;
+      g_rangeCreatedTime = iTime(NULL, 0,
+                                 shift + SignalConfirmationLength);
+      g_activeRangeObjectBase = g_objectPrefix + "RANGE_"
+                                + IntegerToString((int)g_rangeCreatedTime);
+      g_rangeActive = true;
+   }
+
+   if(!g_rangeActive)
+      return;
+
+   double barClose = iClose(NULL, 0, shift);
+   if(barClose > g_rangeTop || barClose < g_rangeBottom)
+   {
+      direction = barClose > g_rangeTop ? 1 : -1;
+      breakoutTop = g_rangeTop;
+      breakoutBottom = g_rangeBottom;
+      volumeAligned = IsVolumeAligned(direction, shift);
+
+      if(ShouldDrawShift(shift))
+      {
+         DrawRangeZone(g_activeRangeObjectBase, g_rangeCreatedTime,
+                       iTime(NULL, 0, shift), breakoutTop, breakoutBottom);
+         DrawBreakoutArrow(iTime(NULL, 0, shift), shift, direction,
+                           breakoutTop, breakoutBottom, false);
+      }
+
+      g_rangeActive = false;
+      g_rangeTop = 0.0;
+      g_rangeBottom = 0.0;
+      g_rangeCreatedTime = 0;
+      g_activeRangeObjectBase = "";
+   }
+   else if(shift == 1 && ShouldDrawShift(shift))
+   {
+      DrawRangeZone(g_activeRangeObjectBase, g_rangeCreatedTime,
+                    iTime(NULL, 0, shift), g_rangeTop, g_rangeBottom);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Realtime evaluation from last committed state (no mutation)      |
+//+------------------------------------------------------------------+
+void EvaluateCurrentIntrabar()
+{
+   DeleteLiveObjects();
+
+   bool active = g_rangeActive;
+   double top = g_rangeTop;
+   double bottom = g_rangeBottom;
+   datetime leftTime = g_rangeCreatedTime;
+   string liveRangeBase = g_activeRangeObjectBase;
+
+   if(!active && IsZoneCondition(0))
+   {
+      double vrange = iATR(NULL, 0, SignalATRPeriod, 0)
+                      * SignalATRMultiplier;
+      double center = iClose(NULL, 0, 0);
+      top = center + vrange;
+      bottom = center - vrange;
+      leftTime = iTime(NULL, 0, SignalConfirmationLength);
+      liveRangeBase = g_objectPrefix + "LIVE_RANGE";
+      active = true;
+   }
+
+   if(!active)
+   {
+      g_status = "Monitoring current candle for a range/breakout";
+      return;
+   }
+
+   if(ShowChartObjects)
+      DrawRangeZone(liveRangeBase, leftTime, iTime(NULL, 0, 0), top, bottom);
+
+   double currentClose = iClose(NULL, 0, 0);
+   if(currentClose > top || currentClose < bottom)
+   {
+      int direction = currentClose > top ? 1 : -1;
+      bool volumeAligned = IsVolumeAligned(direction, 0);
+      DrawBreakoutArrow(iTime(NULL, 0, 0), 0, direction,
+                        top, bottom, true);
+      HandleSignal(direction, iTime(NULL, 0, 0), 0,
+                   top, bottom, volumeAligned);
+   }
+   else
+   {
+      g_status = "Active range; monitoring current candle";
+   }
+}
+
+bool IsZoneCondition(const int shift)
+{
+   double currentVolatility = CalculateVolatility(shift);
+   if(currentVolatility >= SignalVolatilityThreshold)
+      return(false);
+
+   double precedingVolatility = CalculateVolatility(shift + 1);
+   if(precedingVolatility < SignalVolatilityThreshold)
+      return(false);
+
+   double confirmedVolatility = CalculateVolatility(
+                                 shift + SignalConfirmationLength);
+   return(confirmedVolatility < SignalVolatilityThreshold);
+}
+
+//+------------------------------------------------------------------+
+//| Rolling mean/median body-distance ratio                          |
+//+------------------------------------------------------------------+
+double CalculateVolatility(const int shift)
+{
+   double samples[];
+   ArrayResize(samples, SignalRangeLength);
+
+   double sum = 0.0;
+   for(int j = 0; j < SignalRangeLength; j++)
+   {
+      double value = MathAbs(iClose(NULL, 0, shift + j)
+                             - iOpen(NULL, 0, shift + j));
+      samples[j] = value;
+      sum += value;
+   }
+
+   ArraySort(samples, WHOLE_ARRAY, 0, MODE_ASCEND);
+   double median;
+   if((SignalRangeLength % 2) == 1)
+      median = samples[SignalRangeLength / 2];
+   else
+      median = (samples[SignalRangeLength / 2 - 1]
+                + samples[SignalRangeLength / 2]) * 0.5;
+
+   if(median <= 0.0)
+      return(1.0e100);
+   return((sum / SignalRangeLength) / median);
+}
+
+//+------------------------------------------------------------------+
+//| Volume confirmation                                              |
+//+------------------------------------------------------------------+
+bool IsVolumeAligned(const int direction, const int shift)
+{
+   if(SignalMode == TRADE_ALL_BREAKOUTS)
+      return(true);
+
+   double ratio = VolumeRatio(shift);
+   if(direction > 0)
+      return(ratio > 1.0);
+   return(ratio <= 1.0);
+}
+
+double VolumeRatio(const int shift)
+{
+   double upSum = 0.0;
+   double downSum = 0.0;
+
+   for(int j = 0; j <= SignalConfirmationLength; j++)
+   {
+      double up = 0.0;
+      double down = 0.0;
+      CalculateUpDownVolume(shift + j, up, down);
+      upSum += up;
+      downSum += down;
+   }
+
+   if(downSum <= 0.0)
+   {
+      if(upSum <= 0.0) return(1.0);
+      return(1000000.0);
+   }
+   return(MathAbs(upSum / downSum));
+}
+
+void CalculateUpDownVolume(const int chartShift,
+                           double &up,
+                           double &down)
+{
+   up = 0.0;
+   down = 0.0;
+
+   int lowerTF = (int)SignalLowerTimeframe;
+   int chartTF = Period();
+   if(lowerTF <= 0 || lowerTF >= chartTF)
+   {
+      ClassifyChartVolume(chartShift, up, down);
+      return;
+   }
+
+   datetime startTime = iTime(NULL, 0, chartShift);
+   datetime endTime = chartShift > 0
+                      ? iTime(NULL, 0, chartShift - 1)
+                      : TimeCurrent() + 1;
+
+   int oldestShift = iBarShift(NULL, lowerTF, startTime, false);
+   int newestShift = iBarShift(NULL, lowerTF, endTime - 1, false);
+   if(oldestShift < 0 || newestShift < 0 || oldestShift < newestShift)
+   {
+      ClassifyChartVolume(chartShift, up, down);
+      return;
+   }
+
+   bool found = false;
+   for(int s = oldestShift; s >= newestShift; s--)
+   {
+      datetime lowerTime = iTime(NULL, lowerTF, s);
+      if(lowerTime < startTime || lowerTime >= endTime)
+         continue;
+
+      double v = (double)iVolume(NULL, lowerTF, s);
+      if(IsLowerBarUp(lowerTF, s))
+         up += v;
+      else
+         down += v;
+      found = true;
+   }
+
+   if(!found)
+      ClassifyChartVolume(chartShift, up, down);
+}
+
+bool IsLowerBarUp(const int timeframe, const int shift)
+{
+   double c = iClose(NULL, timeframe, shift);
+   double o = iOpen(NULL, timeframe, shift);
+   if(c > o) return(true);
+   if(c < o) return(false);
+
+   double priorClose = iClose(NULL, timeframe, shift + 1);
+   if(c > priorClose) return(true);
+   if(c < priorClose) return(false);
+
+   int bars = iBars(NULL, timeframe);
+   int limit = shift + 100;
+   if(limit > bars - 2) limit = bars - 2;
+   for(int s = shift + 1; s <= limit; s++)
+   {
+      double olderClose = iClose(NULL, timeframe, s);
+      double olderOpen = iOpen(NULL, timeframe, s);
+      if(olderClose > olderOpen) return(true);
+      if(olderClose < olderOpen) return(false);
+
+      double stillOlderClose = iClose(NULL, timeframe, s + 1);
+      if(olderClose > stillOlderClose) return(true);
+      if(olderClose < stillOlderClose) return(false);
+   }
+   return(true);
+}
+
+void ClassifyChartVolume(const int shift, double &up, double &down)
+{
+   double c = iClose(NULL, 0, shift);
+   double o = iOpen(NULL, 0, shift);
+   bool isUp = true;
+
+   if(c > o)
+      isUp = true;
+   else if(c < o)
+      isUp = false;
+   else
+   {
+      double priorClose = iClose(NULL, 0, shift + 1);
+      if(c > priorClose) isUp = true;
+      else if(c < priorClose) isUp = false;
+   }
+
+   double v = (double)iVolume(NULL, 0, shift);
+   if(isUp) up = v;
+   else down = v;
+}
+
+//+------------------------------------------------------------------+
+//| Next-candle outcome analysis                                     |
+//+------------------------------------------------------------------+
+void RecordHistoricalOutcome(const int eventShift, const int direction)
+{
+   if(eventShift < 2)
+      return;
+
+   int resultShift = eventShift - 1;
+   bool success = direction > 0
+                  ? iClose(NULL, 0, resultShift) > iOpen(NULL, 0, resultShift)
+                  : iClose(NULL, 0, resultShift) < iOpen(NULL, 0, resultShift);
+   datetime signalTime = iTime(NULL, 0, eventShift);
+   AppendOutcome(signalTime, direction, success);
+
+   if(ShowOutcomeMarkers && signalTime >= g_analysisStart &&
+      ShouldDrawShift(resultShift))
+      DrawOutcomeMarker(signalTime, resultShift, direction, success);
+}
+
+void EvaluatePendingOutcome(const int resultShift)
+{
+   if(g_pendingDirection == 0 || g_pendingSignalTime <= 0)
+      return;
+
+   bool success = g_pendingDirection > 0
+                  ? iClose(NULL, 0, resultShift) > iOpen(NULL, 0, resultShift)
+                  : iClose(NULL, 0, resultShift) < iOpen(NULL, 0, resultShift);
+   AppendOutcome(g_pendingSignalTime, g_pendingDirection, success);
+
+   g_analysisEnd = TimeCurrent();
+   int months = AnalysisMonths;
+   if(months < 1) months = 1;
+   g_analysisStart = SubtractCalendarMonths(g_analysisEnd, months);
+
+   if(ShowOutcomeMarkers && g_pendingSignalTime >= g_analysisStart)
+      DrawOutcomeMarker(g_pendingSignalTime, resultShift,
+                        g_pendingDirection, success);
+
+   g_pendingSignalTime = 0;
+   g_pendingDirection = 0;
+   RecalculateOutcomeStatistics();
+}
+
+void AppendOutcome(const datetime signalTime,
+                   const int direction,
+                   const bool success)
+{
+   int size = ArraySize(g_outcomeSignalTime);
+   ArrayResize(g_outcomeSignalTime, size + 1);
+   ArrayResize(g_outcomeDirection, size + 1);
+   ArrayResize(g_outcomeSuccess, size + 1);
+   g_outcomeSignalTime[size] = signalTime;
+   g_outcomeDirection[size] = direction;
+   g_outcomeSuccess[size] = success ? 1 : 0;
+}
+
+void RecalculateOutcomeStatistics()
+{
+   g_totalOutcomes = 0;
+   g_successfulOutcomes = 0;
+   g_failedOutcomes = 0;
+   g_bullishOutcomes = 0;
+   g_bullishSuccesses = 0;
+   g_bearishOutcomes = 0;
+   g_bearishSuccesses = 0;
+
+   int size = ArraySize(g_outcomeSignalTime);
+   for(int i = 0; i < size; i++)
+   {
+      if(g_outcomeSignalTime[i] < g_analysisStart ||
+         g_outcomeSignalTime[i] > g_analysisEnd)
+         continue;
+
+      bool success = (g_outcomeSuccess[i] == 1);
+      int direction = g_outcomeDirection[i];
+      g_totalOutcomes++;
+      if(success) g_successfulOutcomes++;
+      else g_failedOutcomes++;
+
+      if(direction > 0)
+      {
+         g_bullishOutcomes++;
+         if(success) g_bullishSuccesses++;
+      }
+      else
+      {
+         g_bearishOutcomes++;
+         if(success) g_bearishSuccesses++;
+      }
+   }
+}
+
+double OutcomeRate(const int successful, const int total)
+{
+   if(total <= 0) return(0.0);
+   return(100.0 * successful / total);
+}
+
+//+------------------------------------------------------------------+
+//| Quality gates: no current HTF bar and no future data              |
+//| Chart arrows/outcomes remain RAW signals, not filtered trades.    |
+//+------------------------------------------------------------------+
+bool RejectQuality(const string reason)
+{
+   g_qualityStatus = reason;
+   g_qualityPassed = false;
+   return(false);
+}
+
+bool PassesBreakoutQuality(const int direction, const int shift,
+                          const double top, const double bottom)
+{
+   if(ForceSessionOnlyMode)
+   {
+      g_qualityStatus = "Session-only mode: quality gates disabled";
+      g_qualityPassed = true;
+      return(true);
+   }
+   if(!EnableQualityFilter)
+   {
+      g_qualityStatus = "Quality gates disabled";
+      g_qualityPassed = true;
+      return(true);
+   }
+   if(RequireClosedSignalBar && shift < 1)
+      return(RejectQuality("Waiting for candle close"));
+   if(shift < 0 || iBars(NULL, 0) < shift + SignalATRPeriod + 3 ||
+      top <= bottom || bottom <= 0.0)
+      return(RejectQuality("Missing candle/range history"));
+
+   // ATR before the signal: a spike cannot inflate its own baseline.
+   double atr = iATR(NULL, 0, SignalATRPeriod, shift + 1);
+   double o = iOpen(NULL, 0, shift), c = iClose(NULL, 0, shift);
+   double h = iHigh(NULL, 0, shift), l = iLow(NULL, 0, shift);
+   double span = h - l;
+   if(atr <= 0.0 || span <= 0.0 || o <= 0.0 || c <= 0.0)
+      return(RejectQuality("Invalid ATR/candle data"));
+   if(direction * (c - o) <= 0.0)
+      return(RejectQuality("Candle direction disagrees"));
+   if(MathAbs(c - o) / span < MinimumBodyFraction)
+      return(RejectQuality("Weak candle body"));
+   double wick = direction > 0 ? h - MathMax(o, c) : MathMin(o, c) - l;
+   if(wick / span > MaximumRejectionWickFraction)
+      return(RejectQuality("Large rejection wick"));
+   double extension = direction > 0 ? c - top : bottom - c;
+   if(extension < atr * BreakoutBufferATR)
+      return(RejectQuality("Breakout too close to boundary"));
+   if(extension > atr * MaximumBreakoutExtensionATR)
+      return(RejectQuality("Breakout overextended"));
+   if(span > atr * MaximumSignalRangeATR)
+      return(RejectQuality("Spike candle exceeds ATR cap"));
+
+   if(EnableADXFilter)
+   {
+      if(iBars(NULL, 0) < shift + 3 * FilterADXPeriod + 3)
+         return(RejectQuality("Waiting for ADX history"));
+      double adx = iADX(NULL, 0, FilterADXPeriod, PRICE_CLOSE, MODE_MAIN, shift);
+      double plus = iADX(NULL, 0, FilterADXPeriod, PRICE_CLOSE, MODE_PLUSDI, shift);
+      double minus = iADX(NULL, 0, FilterADXPeriod, PRICE_CLOSE, MODE_MINUSDI, shift);
+      if(adx <= 0.0 || adx < MinimumADX)
+         return(RejectQuality("ADX trend strength too low"));
+      if((direction > 0 && plus <= minus) || (direction < 0 && minus <= plus))
+         return(RejectQuality("ADX direction disagrees"));
+   }
+   if(EnableTrendFilter)
+   {
+      int tf = (int)TrendTimeframe;
+      if(tf == PERIOD_CURRENT) tf = Period();
+      datetime decision = shift > 0 ? iTime(NULL, 0, shift - 1) : TimeCurrent();
+      int containing = iBarShift(NULL, tf, decision, false);
+      int closed = containing + 1;
+      if(containing < 0 || iBars(NULL, tf) < closed + TrendSlowEMA + 2 ||
+         iTime(NULL, tf, containing) <= 0 ||
+         decision >= iTime(NULL, tf, containing) + PeriodSeconds((ENUM_TIMEFRAMES)tf))
+         return(RejectQuality("Waiting for synchronized trend history"));
+      double fast = iMA(NULL, tf, TrendFastEMA, 0, MODE_EMA, PRICE_CLOSE, closed);
+      double slow = iMA(NULL, tf, TrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE, closed);
+      double close = iClose(NULL, tf, closed);
+      if(fast <= 0.0 || slow <= 0.0 || close <= 0.0)
+         return(RejectQuality("Invalid trend data"));
+      if((direction > 0 && (fast <= slow || close <= fast)) ||
+         (direction < 0 && (fast >= slow || close >= fast)))
+         return(RejectQuality("Closed HTF trend disagrees"));
+   }
+   g_qualityPassed = true;
+   g_qualityStatus = "PASS: enabled signal gates";
+   return(true);
+}
+
+bool InEntrySession()
+{
+   if(!EnableSessionFilter) return(true);
+   int hour = TimeHour(TimeCurrent());
+   if(SessionStartHour < SessionEndHour)
+      return(hour >= SessionStartHour && hour < SessionEndHour);
+   return(hour >= SessionStartHour || hour < SessionEndHour);
+}
+
+//+------------------------------------------------------------------+
+//| Process an eligible breakout                                    |
+//+------------------------------------------------------------------+
+void HandleSignal(const int direction,
+                  const datetime signalTime,
+                  const int signalShift,
+                  const double rangeTop,
+                  const double rangeBottom,
+                  const bool volumeAligned)
+{
+   if(direction == 0 || signalTime <= 0)
+      return;
+
+   if(direction > 0 && signalTime == g_lastHandledBullSignal)
+      return;
+   if(direction < 0 && signalTime == g_lastHandledBearSignal)
+      return;
+
+   if(!ForceSessionOnlyMode &&
+      SignalMode == TRADE_VOLUME_CONFIRMED && !volumeAligned)
+   {
+      RejectQuality("Volume confirmation disagrees");
+      g_status = "Breakout rejected: volume confirmation not aligned";
+      LogEntryDiagnostic(direction, signalTime, g_status);
+      return;
+   }
+
+   if(!PassesBreakoutQuality(direction, signalShift, rangeTop, rangeBottom))
+   {
+      g_status = "Signal rejected: " + g_qualityStatus;
+      LogEntryDiagnostic(direction, signalTime, g_status);
+      if(signalShift > 0) MarkSignalHandled(direction, signalTime);
+      return;
+   }
+
+   if(g_dailyLossBlocked)
+   {
+      MarkSignalHandled(direction, signalTime);
+      g_status = "Signal blocked: daily loss limit "
+                 + DoubleToString(MaximumDailyLossPercent, 1) + "% reached";
+      LogEntryDiagnostic(direction, signalTime, g_status);
+      return;
+   }
+
+   bool hadOpposite = (CountOpenPositions(-direction) > 0);
+   bool mustCloseOpposite = (CloseOnOppositeSignal ||
+                             ExitMethod == EXIT_OPPOSITE_SIGNAL);
+   if(hadOpposite && mustCloseOpposite)
+   {
+      if(!ClosePositions(-direction))
+      {
+         g_status = "Could not close opposite position(s)";
+         LogEntryDiagnostic(direction, signalTime, g_status);
+         return;
+      }
+      if(!OpenReverseTrade)
+      {
+         MarkSignalHandled(direction, signalTime);
+         g_status = "Opposite position closed; reversal disabled";
+         return;
+      }
+   }
+
+   // Entry-only gates do not suppress qualified opposite-signal exits.
+   if(g_entriesPaused || !InEntrySession())
+   {
+      MarkSignalHandled(direction, signalTime);
+      g_status = g_entriesPaused ? "New entries paused; exits active"
+                                : "Entry skipped: outside broker-time session";
+      LogEntryDiagnostic(direction, signalTime, g_status);
+      return;
+   }
+   if(EnableQualityFilter && !ForceSessionOnlyMode)
+   {
+      RefreshRates();
+      double atr = iATR(NULL, 0, SignalATRPeriod, signalShift + 1);
+      double price = direction > 0 ? Ask : Bid;
+      double distance = direction > 0 ? price - rangeTop : rangeBottom - price;
+      if(atr <= 0.0 || distance < atr * BreakoutBufferATR ||
+         distance > atr * MaximumBreakoutExtensionATR ||
+         (direction > 0 && Bid <= rangeTop) ||
+         (direction < 0 && Ask >= rangeBottom))
+      {
+         g_status = "Entry skipped: price retraced or overextended";
+         LogEntryDiagnostic(direction, signalTime, g_status);
+         return;
+      }
+      if(MaximumSpreadATR > 0.0 && Ask - Bid > atr * MaximumSpreadATR)
+      {
+         g_status = "Entry skipped: spread / ATR too high";
+         LogEntryDiagnostic(direction, signalTime, g_status);
+         return;
+      }
+   }
+
+   if(direction > 0 && !AllowBuyTrades)
+   {
+      MarkSignalHandled(direction, signalTime);
+      g_status = "Bullish signal handled; buys disabled";
+      LogEntryDiagnostic(direction, signalTime, g_status);
+      return;
+   }
+   if(direction < 0 && !AllowSellTrades)
+   {
+      MarkSignalHandled(direction, signalTime);
+      g_status = "Bearish signal handled; sells disabled";
+      LogEntryDiagnostic(direction, signalTime, g_status);
+      return;
+   }
+
+   if(CountOpenPositions(0) >= MaxOpenPositions)
+   {
+      MarkSignalHandled(direction, signalTime);
+      g_status = "Signal skipped: maximum positions reached";
+      LogEntryDiagnostic(direction, signalTime, g_status);
+      return;
+   }
+
+   if(MaximumSpreadPoints > 0 && !ForceSessionOnlyMode)
+   {
+      RefreshRates();
+      double spread = (Ask - Bid) / Point;
+      if(spread > MaximumSpreadPoints)
+      {
+         g_status = "Signal waiting: spread " + DoubleToString(spread, 1)
+                    + " > maximum " + IntegerToString(MaximumSpreadPoints);
+         return;
+      }
+   }
+
+   if(OpenMarketPosition(direction, signalShift, rangeTop, rangeBottom))
+      MarkSignalHandled(direction, signalTime);
+   else
+      LogEntryDiagnostic(direction, signalTime, g_status);
+}
+
+void LogEntryDiagnostic(const int direction,
+                        const datetime signalTime,
+                        const string reason)
+{
+   // Log once per signal/reason so the Journal remains readable while still
+   // explaining every distinct reason an entry was not opened.
+   if(signalTime == g_lastEntryDiagnosticSignal &&
+      reason == g_lastEntryDiagnosticReason)
+      return;
+
+   g_lastEntryDiagnosticSignal = signalTime;
+   g_lastEntryDiagnosticReason = reason;
+   Print("RBS EA: ENTRY NOT OPENED | ",
+         direction > 0 ? "BUY" : "SELL",
+         " | signal ", TimeToString(signalTime, TIME_DATE|TIME_SECONDS),
+         " | reason: ", reason,
+         " | symbol=", Symbol(),
+         " | equity=", DoubleToString(AccountEquity(), 2),
+         " | lots=", DoubleToString(FixedLots, LotDigits()),
+         " | risk=", DoubleToString(RiskPercent, 2), "%");
+}
+
+void MarkSignalHandled(const int direction, const datetime signalTime)
+{
+   if(direction > 0)
+      g_lastHandledBullSignal = signalTime;
+   else
+      g_lastHandledBearSignal = signalTime;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate stops, size, and submit a market order                 |
+//+------------------------------------------------------------------+
+bool OpenMarketPosition(const int direction,
+                        const int signalShift,
+                        const double rangeTop,
+                        const double rangeBottom)
+{
+   if(!IsTradeAllowed())
+   {
+      g_status = "Trading not allowed; check AutoTrading";
+      return(false);
+   }
+   if(IsTradeContextBusy())
+   {
+      g_status = "Trade context busy; will retry";
+      return(false);
+   }
+
+   RefreshRates();
+   int command = direction > 0 ? OP_BUY : OP_SELL;
+   double entry = direction > 0 ? Ask : Bid;
+   double stopLoss = 0.0;
+   double takeProfit = 0.0;
+
+   if(!CalculateStops(direction, signalShift, entry, rangeTop, rangeBottom,
+                      stopLoss, takeProfit))
+      return(false);
+
+   AdjustAndNormalizeStops(direction, entry, stopLoss, takeProfit);
+
+   double riskDistance = stopLoss > 0.0
+                         ? MathAbs(entry - stopLoss)
+                         : RiskReferencePointsWithoutSL * Point;
+   double lots = CalculateLots(riskDistance, command);
+   if(lots <= 0.0)
+   {
+      g_status = "Lot calculation failed or free margin too low";
+      return(false);
+   }
+
+   // Convert the requested risk percentage into a real monetary SL
+   // distance using this symbol's tick size/value.
+   if(ForceFixedLotTradeMode ||
+      (LotSizingMode == LOT_BALANCE_STEP_NOMINAL &&
+       EnforceTierRiskAsActualStop) ||
+      (LotSizingMode == LOT_FIXED && EnforceFixedLotRiskAsActualStop))
+   {
+      if(!ApplyExactTierRiskStop(direction, entry, lots,
+                                 stopLoss, takeProfit))
+         return(false);
+      AdjustAndNormalizeStops(direction, entry, stopLoss, takeProfit);
+   }
+
+   color orderColor = direction > 0 ? C'0,255,187' : C'255,17,0';
+   ResetLastError();
+   int ticket = OrderSend(Symbol(), command, lots,
+                          NormalizeDouble(entry, Digits), SlippagePoints,
+                          stopLoss, takeProfit, TradeComment,
+                          MagicNumber, 0, orderColor);
+   int sendError = GetLastError();
+
+   // ECN fallback: submit without stops, then add them immediately.
+   if(ticket < 0 && sendError == 130 &&
+      (stopLoss > 0.0 || takeProfit > 0.0))
+   {
+      RefreshRates();
+      entry = direction > 0 ? Ask : Bid;
+      ResetLastError();
+      ticket = OrderSend(Symbol(), command, lots,
+                         NormalizeDouble(entry, Digits), SlippagePoints,
+                         0, 0, TradeComment, MagicNumber, 0, orderColor);
+      sendError = GetLastError();
+
+      if(ticket >= 0)
+      {
+         // Recalculate the exact tier-risk stop from the broker's actual
+         // ECN fill price before attaching protection.
+         if((ForceFixedLotTradeMode ||
+             (LotSizingMode == LOT_BALANCE_STEP_NOMINAL &&
+              EnforceTierRiskAsActualStop) ||
+             (LotSizingMode == LOT_FIXED && EnforceFixedLotRiskAsActualStop)) &&
+            OrderSelect(ticket, SELECT_BY_TICKET))
+         {
+            if(!ApplyExactTierRiskStop(direction, OrderOpenPrice(), lots,
+                                       stopLoss, takeProfit))
+            {
+               CloseTicket(ticket);
+               return(false);
+            }
+         }
+
+         bool modified = ApplyStopsAfterECNOrder(ticket, direction,
+                                                 stopLoss, takeProfit);
+         if(!modified && CloseTradeIfECNStopModifyFails && stopLoss > 0.0)
+         {
+            Print("RBS EA: protective stop modification failed; closing ticket ",
+                  ticket, " for safety.");
+            CloseTicket(ticket);
+            g_status = "ECN stop modification failed; trade closed";
+            return(false);
+         }
+      }
+   }
+
+   if(ticket < 0)
+   {
+      g_status = "OrderSend failed, error " + IntegerToString(sendError);
+      Print("RBS EA: OrderSend failed. Error ", sendError,
+            ", direction ", direction,
+            ", lots ", DoubleToString(lots, LotDigits()),
+            ", SL ", DoubleToString(stopLoss, Digits),
+            ", TP ", DoubleToString(takeProfit, Digits));
+      return(false);
+   }
+
+   g_status = (direction > 0 ? "BUY" : "SELL")
+              + " opened, ticket " + IntegerToString(ticket)
+              + ", lots " + DoubleToString(lots, LotDigits());
+   Print("RBS EA: ", g_status);
+   return(true);
+}
+
+//+------------------------------------------------------------------+
+//| Exit calculations                                                |
+//+------------------------------------------------------------------+
+bool CalculateStops(const int direction,
+                    const int signalShift,
+                    const double entry,
+                    const double rangeTop,
+                    const double rangeBottom,
+                    double &stopLoss,
+                    double &takeProfit)
+{
+   stopLoss = 0.0;
+   takeProfit = 0.0;
+
+   if(ExitMethod == EXIT_OPPOSITE_SIGNAL)
+      return(true);
+
+   if(ExitMethod == EXIT_RANGE_RISK_REWARD)
+   {
+      if(rangeTop <= rangeBottom || rangeBottom <= 0.0)
+      {
+         g_status = "Internal range boundary unavailable; trade skipped";
+         return(false);
+      }
+      stopLoss = direction > 0
+                 ? rangeBottom - RangeStopBufferPoints * Point
+                 : rangeTop + RangeStopBufferPoints * Point;
+   }
+   else if(ExitMethod == EXIT_ATR_RISK_REWARD)
+   {
+      double atr = iATR(NULL, 0, SignalATRPeriod, signalShift);
+      if(atr <= 0.0)
+      {
+         g_status = "ATR unavailable; trade skipped";
+         return(false);
+      }
+      double distance = atr * ATRStopMultiplier;
+      stopLoss = direction > 0 ? entry - distance : entry + distance;
+   }
+   else if(ExitMethod == EXIT_FIXED_POINTS)
+   {
+      if(FixedStopLossPoints > 0)
+         stopLoss = direction > 0
+                    ? entry - FixedStopLossPoints * Point
+                    : entry + FixedStopLossPoints * Point;
+      if(FixedTakeProfitPoints > 0)
+         takeProfit = direction > 0
+                      ? entry + FixedTakeProfitPoints * Point
+                      : entry - FixedTakeProfitPoints * Point;
+      return(true);
+   }
+
+   if(stopLoss <= 0.0 ||
+      (direction > 0 && stopLoss >= entry) ||
+      (direction < 0 && stopLoss <= entry))
+   {
+      g_status = "Calculated stop is on the wrong side of entry";
+      return(false);
+   }
+
+   double riskDistance = MathAbs(entry - stopLoss);
+   if(RiskRewardRatio > 0.0)
+      takeProfit = direction > 0
+                   ? entry + riskDistance * RiskRewardRatio
+                   : entry - riskDistance * RiskRewardRatio;
+   return(true);
+}
+
+void AdjustAndNormalizeStops(const int direction,
+                             const double entry,
+                             double &stopLoss,
+                             double &takeProfit)
+{
+   double minimumDistance = MarketInfo(Symbol(), MODE_STOPLEVEL) * Point;
+   if(AdjustStopsToBrokerMinimum)
+      minimumDistance += 2.0 * Point;
+
+   if(stopLoss > 0.0 && AdjustStopsToBrokerMinimum)
+   {
+      if(direction > 0 && entry - stopLoss < minimumDistance)
+         stopLoss = entry - minimumDistance;
+      if(direction < 0 && stopLoss - entry < minimumDistance)
+         stopLoss = entry + minimumDistance;
+   }
+
+   if(takeProfit > 0.0 && AdjustStopsToBrokerMinimum)
+   {
+      if(direction > 0 && takeProfit - entry < minimumDistance)
+         takeProfit = entry + minimumDistance;
+      if(direction < 0 && entry - takeProfit < minimumDistance)
+         takeProfit = entry - minimumDistance;
+   }
+
+   if(stopLoss > 0.0) stopLoss = NormalizeDouble(stopLoss, Digits);
+   if(takeProfit > 0.0) takeProfit = NormalizeDouble(takeProfit, Digits);
+}
+
+//+------------------------------------------------------------------+
+//| Lot sizing                                                       |
+//+------------------------------------------------------------------+
+double CalculateLots(const double riskDistance, const int command)
+{
+   double lots;
+
+   // Forced fixed mode prevents legacy Strategy Tester .set files from
+   // returning to LOT_RISK_PERCENT and rejecting every 0.01-lot trade.
+   if(ForceFixedLotTradeMode)
+   {
+      lots = ForcedTradeLots;
+   }
+   else if(LotSizingMode == LOT_FIXED)
+   {
+      lots = FixedLots;
+   }
+   else if(LotSizingMode == LOT_RISK_PERCENT)
+   {
+      if(riskDistance <= 0.0)
+         return(0.0);
+
+      double tickValue = MarketInfo(Symbol(), MODE_TICKVALUE);
+      double tickSize = MarketInfo(Symbol(), MODE_TICKSIZE);
+      if(tickValue <= 0.0 || tickSize <= 0.0)
+      {
+         Print("RBS EA: broker returned invalid tick value/tick size.");
+         return(0.0);
+      }
+
+      double riskMoney = AccountEquity() * RiskPercent / 100.0;
+      double lossPerLot = (riskDistance / tickSize) * tickValue
+                          + EstimatedRoundTurnCommissionPerLot;
+      if(lossPerLot <= 0.0)
+         return(0.0);
+      lots = riskMoney / lossPerLot;
+      // Never round UP to minimum lot and silently exceed the risk budget.
+      double minimumLot = MarketInfo(Symbol(), MODE_MINLOT);
+      if(minimumLot <= 0.0 || lots < minimumLot)
+      {
+         Print("RBS EA: risk budget cannot support broker minimum lot; skipped.");
+         return(0.0);
+      }
+   }
+   else
+   {
+      // Requested nominal progression:
+      // $100 -> 0.01 lot, $250 -> 0.02 lot, then +0.01 per $150.
+      lots = BalanceStepLotSize();
+   }
+
+   lots = NormalizeLots(lots);
+   double freeAfter = AccountFreeMarginCheck(Symbol(), command, lots);
+   if(freeAfter <= 0.0)
+   {
+      Print("RBS EA: insufficient free margin for ",
+            DoubleToString(lots, LotDigits()), " lots.");
+      return(0.0);
+   }
+   return(lots);
+}
+
+double BalanceStepLotSize()
+{
+   double balanceGrowth = AccountBalance() - StepStartingBalance;
+   int completedSteps = 0;
+   if(balanceGrowth >= BalanceProfitStep)
+      completedSteps = (int)MathFloor(balanceGrowth / BalanceProfitStep);
+   return(StepStartingLot + completedSteps * LotIncrementPerStep);
+}
+
+double NominalRiskForLot(const double lots)
+{
+   if(lots <= 0.0) return(0.0);
+   return((lots / 0.01) * NominalRiskPer001Lot);
+}
+
+bool ApplyExactTierRiskStop(const int direction,
+                            const double entry,
+                            const double lots,
+                            double &stopLoss,
+                            double &takeProfit)
+{
+   double tickValue = MarketInfo(Symbol(), MODE_TICKVALUE);
+   double tickSize = MarketInfo(Symbol(), MODE_TICKSIZE);
+   if(tickValue <= 0.0 || tickSize <= 0.0 || lots <= 0.0)
+   {
+      g_status = "Cannot calculate exact tier risk: invalid tick data";
+      Print("RBS EA: exact tier-risk SL failed. Tick value ", tickValue,
+            ", tick size ", tickSize, ", lots ", lots, ".");
+      return(false);
+   }
+
+   double tierRiskPercent = ForceFixedLotTradeMode
+                             ? ForcedTradeRiskPercent
+                             : ((LotSizingMode == LOT_FIXED)
+                                ? RiskPercent
+                                : NominalRiskForLot(lots));
+   double riskMoney = AccountEquity() * tierRiskPercent / 100.0;
+   double moneyPerPriceUnit = (tickValue / tickSize) * lots;
+   if(riskMoney <= 0.0 || moneyPerPriceUnit <= 0.0)
+      return(false);
+
+   double exactDistance = riskMoney / moneyPerPriceUnit;
+   double brokerPoints = MarketInfo(Symbol(), MODE_STOPLEVEL);
+   double freezePoints = MarketInfo(Symbol(), MODE_FREEZELEVEL);
+   if(freezePoints > brokerPoints) brokerPoints = freezePoints;
+   double minimumDistance = (brokerPoints + 2.0) * Point;
+
+   if(exactDistance < minimumDistance)
+   {
+      if(SkipIfExactRiskStopIsTooClose)
+      {
+         g_status = "Exact risk SL is inside broker minimum; trade skipped";
+         Print("RBS EA: exact ", DoubleToString(tierRiskPercent, 1),
+               "% risk stop needs ", DoubleToString(exactDistance / Point, 1),
+               " points, below broker minimum ",
+               DoubleToString(minimumDistance / Point, 1), ".");
+         return(false);
+      }
+      exactDistance = minimumDistance;
+   }
+
+   stopLoss = direction > 0 ? entry - exactDistance
+                            : entry + exactDistance;
+   if(stopLoss <= 0.0)
+   {
+      g_status = "Exact tier-risk stop produced an invalid price";
+      return(false);
+   }
+
+   // Preserve a fixed-points TP when selected. Range/ATR R:R modes are
+   // recalculated from the exact monetary-risk stop. Opposite-signal mode
+   // receives the protective exact-risk SL but no automatic TP.
+   if(ExitMethod == EXIT_RANGE_RISK_REWARD ||
+      ExitMethod == EXIT_ATR_RISK_REWARD)
+   {
+      if(RiskRewardRatio > 0.0)
+         takeProfit = direction > 0
+                      ? entry + exactDistance * RiskRewardRatio
+                      : entry - exactDistance * RiskRewardRatio;
+      else
+         takeProfit = 0.0;
+   }
+   else if(ExitMethod == EXIT_OPPOSITE_SIGNAL)
+   {
+      takeProfit = 0.0;
+   }
+
+   stopLoss = NormalizeDouble(stopLoss, Digits);
+   if(takeProfit > 0.0)
+      takeProfit = NormalizeDouble(takeProfit, Digits);
+
+   g_status = "Exact tier risk " + DoubleToString(tierRiskPercent, 1)
+              + "% = " + DoubleToString(riskMoney, 2)
+              + " money risk";
+   return(true);
+}
+
+double NormalizeLots(double lots)
+{
+   double minimum = MarketInfo(Symbol(), MODE_MINLOT);
+   double maximum = MarketInfo(Symbol(), MODE_MAXLOT);
+   double step = MarketInfo(Symbol(), MODE_LOTSTEP);
+   if(step <= 0.0) step = 0.01;
+
+   if(lots < minimum) lots = minimum;
+   if(lots > maximum) lots = maximum;
+   lots = MathFloor(lots / step + 1.0e-8) * step;
+   return(NormalizeDouble(lots, LotDigits()));
+}
+
+int LotDigits()
+{
+   double step = MarketInfo(Symbol(), MODE_LOTSTEP);
+   if(step >= 1.0) return(0);
+   if(step >= 0.1) return(1);
+   if(step >= 0.01) return(2);
+   return(3);
+}
+
+//+------------------------------------------------------------------+
+//| Daily loss protection                                            |
+//+------------------------------------------------------------------+
+int BrokerDayKey(const datetime value)
+{
+   return(TimeYear(value) * 1000 + TimeDayOfYear(value));
+}
+
+datetime BrokerDayStart(const datetime value)
+{
+   MqlDateTime parts;
+   TimeToStruct(value, parts);
+   parts.hour = 0;
+   parts.min = 0;
+   parts.sec = 0;
+   return(StructToTime(parts));
+}
+
+double ClosedEAProfitSince(const datetime startTime)
+{
+   double result = 0.0;
+   for(int i = OrdersHistoryTotal() - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY))
+         continue;
+      if(OrderMagicNumber() != MagicNumber)
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+      if(OrderCloseTime() < startTime)
+         continue;
+      result += OrderProfit() + OrderSwap() + OrderCommission();
+   }
+   return(result);
+}
+
+double FloatingEAProfit()
+{
+   double result = 0.0;
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         continue;
+      if(OrderMagicNumber() != MagicNumber)
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+      result += OrderProfit() + OrderSwap() + OrderCommission();
+   }
+   return(result);
+}
+
+void InitializeDailyRiskState()
+{
+   datetime now = TimeCurrent();
+   g_dailyDayKey = BrokerDayKey(now);
+   g_dailyStartTime = BrokerDayStart(now);
+   g_dailyClosedProfit = ClosedEAProfitSince(g_dailyStartTime);
+   g_dailyHistoryCount = OrdersHistoryTotal();
+   g_dailyStartBalance = AccountBalance() - g_dailyClosedProfit;
+   if(g_dailyStartBalance <= 0.0)
+      g_dailyStartBalance = AccountBalance();
+   g_dailyFloatingProfit = FloatingEAProfit();
+   g_dailyNetResult = g_dailyClosedProfit + g_dailyFloatingProfit;
+   g_dailyLossBlocked = false;
+
+   if(EnableDailyLossLimit && g_dailyStartBalance > 0.0)
+   {
+      double maximumLoss = g_dailyStartBalance
+                           * MaximumDailyLossPercent / 100.0;
+      if(g_dailyNetResult <= -maximumLoss)
+         g_dailyLossBlocked = true;
+   }
+}
+
+void UpdateDailyLossProtection()
+{
+   datetime now = TimeCurrent();
+   int currentKey = BrokerDayKey(now);
+   if(currentKey != g_dailyDayKey)
+   {
+      // A new broker day resets the lock and establishes a fresh balance.
+      g_dailyDayKey = currentKey;
+      g_dailyStartTime = BrokerDayStart(now);
+      g_dailyClosedProfit = ClosedEAProfitSince(g_dailyStartTime);
+      g_dailyHistoryCount = OrdersHistoryTotal();
+      g_dailyStartBalance = AccountBalance() - g_dailyClosedProfit;
+      if(g_dailyStartBalance <= 0.0)
+         g_dailyStartBalance = AccountBalance();
+      g_dailyFloatingProfit = FloatingEAProfit();
+      g_dailyNetResult = g_dailyFloatingProfit;
+      g_dailyLossBlocked = false;
+      g_status = "New broker day: daily loss lock reset";
+   }
+
+   int historyCount = OrdersHistoryTotal();
+   if(historyCount != g_dailyHistoryCount)
+   {
+      g_dailyClosedProfit = ClosedEAProfitSince(g_dailyStartTime);
+      g_dailyHistoryCount = historyCount;
+   }
+   g_dailyFloatingProfit = FloatingEAProfit();
+   g_dailyNetResult = g_dailyClosedProfit + g_dailyFloatingProfit;
+
+   if(!EnableDailyLossLimit || g_dailyStartBalance <= 0.0)
+      return;
+
+   if(g_dailyLossBlocked)
+   {
+      if(CloseAllEATradesAtDailyLimit && CountAllMagicPositions() > 0)
+         CloseAllMagicPositions();
+      return;
+   }
+
+   double maximumLoss = g_dailyStartBalance
+                        * MaximumDailyLossPercent / 100.0;
+   if(g_dailyNetResult <= -maximumLoss)
+   {
+      g_dailyLossBlocked = true;
+      g_status = "DAILY LOSS LIMIT REACHED - entries locked";
+      Print("RBS EA: daily loss limit reached. Start balance ",
+            DoubleToString(g_dailyStartBalance, 2),
+            ", daily result ", DoubleToString(g_dailyNetResult, 2),
+            ", limit ", DoubleToString(maximumLoss, 2), ".");
+
+      if(CloseAllEATradesAtDailyLimit)
+      {
+         CloseAllMagicPositions();
+         g_dailyClosedProfit = ClosedEAProfitSince(g_dailyStartTime);
+         g_dailyHistoryCount = OrdersHistoryTotal();
+         g_dailyFloatingProfit = FloatingEAProfit();
+         g_dailyNetResult = g_dailyClosedProfit + g_dailyFloatingProfit;
+      }
+   }
+}
+
+int CountAllMagicPositions()
+{
+   int count = 0;
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         continue;
+      if(OrderMagicNumber() != MagicNumber)
+         continue;
+      if(OrderType() == OP_BUY || OrderType() == OP_SELL)
+         count++;
+   }
+   return(count);
+}
+
+bool CloseAllMagicPositions()
+{
+   bool allClosed = true;
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         continue;
+      if(OrderMagicNumber() != MagicNumber)
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+
+      string orderSymbol = OrderSymbol();
+      int symbolDigits = (int)MarketInfo(orderSymbol, MODE_DIGITS);
+      double closePrice = OrderType() == OP_BUY
+                          ? MarketInfo(orderSymbol, MODE_BID)
+                          : MarketInfo(orderSymbol, MODE_ASK);
+      int ticket = OrderTicket();
+      ResetLastError();
+      bool closed = OrderClose(ticket, OrderLots(),
+                               NormalizeDouble(closePrice, symbolDigits),
+                               SlippagePoints, FailureColor);
+      if(!closed)
+      {
+         allClosed = false;
+         Print("RBS EA: daily-limit close failed for ticket ", ticket,
+               ". Error ", GetLastError());
+      }
+   }
+   return(allClosed);
+}
+
+//+------------------------------------------------------------------+
+//| Step-based trailing stop                                         |
+//| Starts after TrailingStartPoints profit, stays                    |
+//| TrailingDistancePoints behind price, and moves in                 |
+//| TrailingStepPoints increments.                                   |
+//+------------------------------------------------------------------+
+void ManageTrailingStops()
+{
+   if(!EnableTrailingStop)
+      return;
+
+   RefreshRates();
+   double startDistance = TrailingStartPoints * Point;
+   double requestedDistance = TrailingDistancePoints * Point;
+   double stepDistance = TrailingStepPoints * Point;
+   double brokerPoints = MarketInfo(Symbol(), MODE_STOPLEVEL);
+   double freezePoints = MarketInfo(Symbol(), MODE_FREEZELEVEL);
+   if(freezePoints > brokerPoints) brokerPoints = freezePoints;
+   double brokerDistance = (brokerPoints + 2.0) * Point;
+   double trailDistance = requestedDistance;
+   if(trailDistance < brokerDistance) trailDistance = brokerDistance;
+
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         continue;
+      if(OrderSymbol() != Symbol() || OrderMagicNumber() != MagicNumber)
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+
+      double desiredStop = 0.0;
+      bool shouldModify = false;
+
+      if(OrderType() == OP_BUY)
+      {
+         double profitDistance = Bid - OrderOpenPrice();
+         if(profitDistance < startDistance)
+            continue;
+
+         desiredStop = NormalizeDouble(Bid - trailDistance, Digits);
+         // Never loosen an existing stop. After the first move, require
+         // a full configured step before modifying again.
+         if(OrderStopLoss() <= 0.0)
+            shouldModify = (desiredStop > OrderOpenPrice());
+         else
+            shouldModify = (desiredStop > OrderStopLoss() + stepDistance
+                            - Point * 0.1);
+      }
+      else
+      {
+         double profitDistance = OrderOpenPrice() - Ask;
+         if(profitDistance < startDistance)
+            continue;
+
+         desiredStop = NormalizeDouble(Ask + trailDistance, Digits);
+         if(OrderStopLoss() <= 0.0)
+            shouldModify = (desiredStop < OrderOpenPrice());
+         else
+            shouldModify = (desiredStop < OrderStopLoss() - stepDistance
+                            + Point * 0.1);
+      }
+
+      if(!shouldModify || desiredStop <= 0.0)
+         continue;
+
+      int ticket = OrderTicket();
+      ResetLastError();
+      bool modified = OrderModify(ticket, OrderOpenPrice(), desiredStop,
+                                  OrderTakeProfit(), 0,
+                                  OrderType() == OP_BUY
+                                  ? ProBullColor : ProBearColor);
+      if(modified)
+      {
+         g_status = "Trailing stop moved: ticket "
+                    + IntegerToString(ticket) + " to "
+                    + DoubleToString(desiredStop, Digits);
+      }
+      else
+      {
+         int error = GetLastError();
+         if(error != 1)
+            Print("RBS EA: trailing OrderModify failed for ticket ",
+                  ticket, ". Error ", error,
+                  ", requested SL ", DoubleToString(desiredStop, Digits));
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Position management                                              |
+//+------------------------------------------------------------------+
+int CountOpenPositions(const int direction)
+{
+   int count = 0;
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         continue;
+      if(OrderSymbol() != Symbol() || OrderMagicNumber() != MagicNumber)
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+      if(direction > 0 && OrderType() != OP_BUY)
+         continue;
+      if(direction < 0 && OrderType() != OP_SELL)
+         continue;
+      count++;
+   }
+   return(count);
+}
+
+bool ClosePositions(const int direction)
+{
+   bool allClosed = true;
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         continue;
+      if(OrderSymbol() != Symbol() || OrderMagicNumber() != MagicNumber)
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+      if(direction > 0 && OrderType() != OP_BUY)
+         continue;
+      if(direction < 0 && OrderType() != OP_SELL)
+         continue;
+
+      if(!CloseTicket(OrderTicket()))
+         allClosed = false;
+   }
+   return(allClosed);
+}
+
+bool CloseTicket(const int ticket)
+{
+   if(!OrderSelect(ticket, SELECT_BY_TICKET))
+      return(false);
+   if(OrderCloseTime() > 0)
+      return(true);
+
+   RefreshRates();
+   double closePrice = OrderType() == OP_BUY ? Bid : Ask;
+   ResetLastError();
+   bool closed = OrderClose(ticket, OrderLots(),
+                            NormalizeDouble(closePrice, Digits),
+                            SlippagePoints, clrSilver);
+   if(!closed)
+      Print("RBS EA: OrderClose failed for ticket ", ticket,
+            ". Error ", GetLastError());
+   return(closed);
+}
+
+bool ApplyStopsAfterECNOrder(const int ticket,
+                            const int direction,
+                            double stopLoss,
+                            double takeProfit)
+{
+   if(!OrderSelect(ticket, SELECT_BY_TICKET))
+      return(false);
+
+   RefreshRates();
+   double reference = direction > 0 ? Bid : Ask;
+   AdjustAndNormalizeStops(direction, reference, stopLoss, takeProfit);
+
+   ResetLastError();
+   bool modified = OrderModify(ticket, OrderOpenPrice(), stopLoss,
+                               takeProfit, 0, clrNONE);
+   if(!modified)
+      Print("RBS EA: OrderModify failed for ECN ticket ", ticket,
+            ". Error ", GetLastError());
+   return(modified);
+}
+
+//+------------------------------------------------------------------+
+//| Ten selectable professional panel systems                        |
+//+------------------------------------------------------------------+
+void ConfigurePanelStyle()
+{
+   // 01 — Neon Command Center
+   g_styleMainHeader = C'0,140,255';
+   g_styleAccount = C'255,145,0';
+   g_styleRisk = C'170,35,185';
+   g_styleSignal = C'0,180,85';
+   g_styleFilter = C'230,0,100';
+   g_styleEquity = C'0,180,230';
+   g_styleResult = C'0,105,220';
+   g_styleTrackerHeader = C'0,135,230';
+   g_styleTableHeader = C'255,155,0';
+   g_styleTotal = C'0,110,190';
+   g_styleAnalysis = C'165,35,180';
+   g_styleAnalysisColumns = C'0,190,90';
+   g_styleBody = C'18,29,46';
+   g_styleBorder = C'55,83,118';
+   g_styleText = C'225,236,250';
+   g_styleLabel = C'110,210,255';
+   g_styleHeaderText = clrWhite;
+   g_styleTableText = clrBlack;
+   g_styleWinCard = C'0,105,210';
+   g_styleLossCard = C'185,24,52';
+   g_styleFont = "Segoe UI";
+   g_styleBoldFont = "Segoe UI Bold";
+   g_styleMonoFont = "Consolas";
+   g_styleMonoBoldFont = "Consolas Bold";
+   g_styleSectionMode = 0;
+
+   switch(g_activePanelStyle)
+   {
+      case PANEL_ROYAL_AURORA:
+         g_styleMainHeader = C'104,52,235';
+         g_styleAccount = C'221,57,184';
+         g_styleRisk = C'126,61,255';
+         g_styleSignal = C'0,202,178';
+         g_styleFilter = C'245,75,130';
+         g_styleEquity = C'46,105,235';
+         g_styleResult = C'172,54,218';
+         g_styleTrackerHeader = C'113,56,224';
+         g_styleTableHeader = C'224,55,185';
+         g_styleTotal = C'80,57,190';
+         g_styleAnalysis = C'152,50,202';
+         g_styleAnalysisColumns = C'0,190,165';
+         g_styleBody = C'25,18,45';
+         g_styleBorder = C'77,50,119';
+         g_styleLabel = C'215,170,255';
+         g_styleWinCard = C'139,42,178';
+         g_styleLossCard = C'220,52,102';
+         g_styleFont = "Trebuchet MS";
+         g_styleBoldFont = "Trebuchet MS Bold";
+         g_styleSectionMode = 2;
+         break;
+
+      case PANEL_EMERALD_MATRIX:
+         g_styleMainHeader = C'0,110,82';
+         g_styleAccount = C'0,175,120';
+         g_styleRisk = C'0,135,110';
+         g_styleSignal = C'0,205,140';
+         g_styleFilter = C'0,145,165';
+         g_styleEquity = C'0,175,190';
+         g_styleResult = C'0,125,105';
+         g_styleTrackerHeader = C'0,115,90';
+         g_styleTableHeader = C'0,185,135';
+         g_styleTotal = C'0,105,90';
+         g_styleAnalysis = C'0,125,110';
+         g_styleAnalysisColumns = C'0,200,145';
+         g_styleBody = C'7,28,24';
+         g_styleBorder = C'25,80,68';
+         g_styleText = C'195,255,230';
+         g_styleLabel = C'80,235,185';
+         g_styleWinCard = C'0,125,92';
+         g_styleLossCard = C'185,47,64';
+         g_styleFont = "Consolas";
+         g_styleBoldFont = "Consolas Bold";
+         g_styleSectionMode = 1;
+         break;
+
+      case PANEL_CRIMSON_TACTICAL:
+         g_styleMainHeader = C'178,16,42';
+         g_styleAccount = C'225,73,20';
+         g_styleRisk = C'205,25,50';
+         g_styleSignal = C'0,155,95';
+         g_styleFilter = C'150,18,36';
+         g_styleEquity = C'222,90,25';
+         g_styleResult = C'184,13,43';
+         g_styleTrackerHeader = C'170,15,40';
+         g_styleTableHeader = C'220,75,18';
+         g_styleTotal = C'145,20,39';
+         g_styleAnalysis = C'115,20,36';
+         g_styleAnalysisColumns = C'225,83,23';
+         g_styleBody = C'31,12,18';
+         g_styleBorder = C'90,34,43';
+         g_styleText = C'255,228,224';
+         g_styleLabel = C'255,143,118';
+         g_styleWinCard = C'8,130,86';
+         g_styleLossCard = C'180,13,42';
+         g_styleFont = "Arial";
+         g_styleBoldFont = "Arial Bold";
+         g_styleSectionMode = 1;
+         break;
+
+      case PANEL_ARCTIC_GLASS:
+         g_styleMainHeader = C'10,126,170';
+         g_styleAccount = C'30,155,205';
+         g_styleRisk = C'85,95,235';
+         g_styleSignal = C'0,190,155';
+         g_styleFilter = C'25,125,190';
+         g_styleEquity = C'0,185,225';
+         g_styleResult = C'65,90,220';
+         g_styleTrackerHeader = C'10,130,175';
+         g_styleTableHeader = C'55,175,220';
+         g_styleTotal = C'40,100,180';
+         g_styleAnalysis = C'68,82,205';
+         g_styleAnalysisColumns = C'0,178,165';
+         g_styleBody = C'12,34,49';
+         g_styleBorder = C'65,165,200';
+         g_styleText = C'222,247,255';
+         g_styleLabel = C'120,224,255';
+         g_styleWinCard = C'8,125,170';
+         g_styleLossCard = C'205,55,80';
+         g_styleFont = "Segoe UI";
+         g_styleBoldFont = "Segoe UI Semibold";
+         g_styleSectionMode = 2;
+         break;
+
+      case PANEL_AMBER_INDUSTRIAL:
+         g_styleMainHeader = C'235,120,0';
+         g_styleAccount = C'240,135,0';
+         g_styleRisk = C'195,75,10';
+         g_styleSignal = C'0,150,180';
+         g_styleFilter = C'205,95,0';
+         g_styleEquity = C'0,145,205';
+         g_styleResult = C'220,110,0';
+         g_styleTrackerHeader = C'225,112,0';
+         g_styleTableHeader = C'0,160,215';
+         g_styleTotal = C'165,80,0';
+         g_styleAnalysis = C'185,88,0';
+         g_styleAnalysisColumns = C'0,145,195';
+         g_styleBody = C'28,23,13';
+         g_styleBorder = C'92,72,28';
+         g_styleText = C'255,240,205';
+         g_styleLabel = C'255,194,80';
+         g_styleWinCard = C'205,98,0';
+         g_styleLossCard = C'178,38,35';
+         g_styleFont = "Arial Narrow";
+         g_styleBoldFont = "Arial Bold";
+         g_styleSectionMode = 1;
+         break;
+
+      case PANEL_ICE_FINTECH:
+         g_styleMainHeader = C'205,235,255';
+         g_styleAccount = C'85,160,210';
+         g_styleRisk = C'35,105,220';
+         g_styleSignal = C'0,175,135';
+         g_styleFilter = C'65,120,175';
+         g_styleEquity = C'75,175,225';
+         g_styleResult = C'30,105,215';
+         g_styleTrackerHeader = C'188,225,250';
+         g_styleTableHeader = C'70,145,205';
+         g_styleTotal = C'35,100,180';
+         g_styleAnalysis = C'45,90,175';
+         g_styleAnalysisColumns = C'0,165,130';
+         g_styleBody = C'16,26,37';
+         g_styleBorder = C'67,98,125';
+         g_styleText = C'230,245,255';
+         g_styleLabel = C'170,220,250';
+         g_styleHeaderText = clrBlack;
+         g_styleWinCard = C'38,126,188';
+         g_styleLossCard = C'195,53,73';
+         g_styleFont = "Tahoma";
+         g_styleBoldFont = "Tahoma Bold";
+         g_styleSectionMode = 2;
+         break;
+
+      case PANEL_BLACK_GOLD:
+         g_styleMainHeader = C'38,31,15';
+         g_styleAccount = C'182,140,28';
+         g_styleRisk = C'132,98,20';
+         g_styleSignal = C'0,145,98';
+         g_styleFilter = C'154,72,25';
+         g_styleEquity = C'115,94,35';
+         g_styleResult = C'175,128,18';
+         g_styleTrackerHeader = C'42,33,13';
+         g_styleTableHeader = C'190,145,35';
+         g_styleTotal = C'103,77,17';
+         g_styleAnalysis = C'85,65,20';
+         g_styleAnalysisColumns = C'165,122,26';
+         g_styleBody = C'25,21,13';
+         g_styleBorder = C'101,80,33';
+         g_styleText = C'255,238,187';
+         g_styleLabel = C'241,198,76';
+         g_styleWinCard = C'137,102,15';
+         g_styleLossCard = C'153,37,42';
+         g_styleFont = "Georgia";
+         g_styleBoldFont = "Georgia Bold";
+         g_styleSectionMode = 3;
+         break;
+
+      case PANEL_SPECTRUM_MODULAR:
+         g_styleMainHeader = C'235,45,160';
+         g_styleAccount = C'235,45,160';
+         g_styleRisk = C'255,184,30';
+         g_styleSignal = C'0,205,140';
+         g_styleFilter = C'128,73,220';
+         g_styleEquity = C'0,180,225';
+         g_styleResult = C'255,68,105';
+         g_styleTrackerHeader = C'106,65,190';
+         g_styleTableHeader = C'0,180,220';
+         g_styleTotal = C'215,45,145';
+         g_styleAnalysis = C'115,62,190';
+         g_styleAnalysisColumns = C'0,190,135';
+         g_styleBody = C'23,17,40';
+         g_styleBorder = C'75,54,115';
+         g_styleText = C'244,232,255';
+         g_styleLabel = C'255,130,215';
+         g_styleWinCard = C'155,44,113';
+         g_styleLossCard = C'210,37,71';
+         g_styleFont = "Verdana";
+         g_styleBoldFont = "Verdana Bold";
+         g_styleSectionMode = 1;
+         break;
+
+      case PANEL_MONO_MINT:
+         g_styleMainHeader = C'225,233,240';
+         g_styleAccount = C'0,185,135';
+         g_styleRisk = C'65,82,98';
+         g_styleSignal = C'0,205,145';
+         g_styleFilter = C'75,88,102';
+         g_styleEquity = C'0,160,125';
+         g_styleResult = C'0,195,140';
+         g_styleTrackerHeader = C'218,228,236';
+         g_styleTableHeader = C'0,180,130';
+         g_styleTotal = C'45,62,72';
+         g_styleAnalysis = C'42,55,65';
+         g_styleAnalysisColumns = C'0,188,135';
+         g_styleBody = C'18,24,31';
+         g_styleBorder = C'54,67,80';
+         g_styleText = C'235,242,246';
+         g_styleLabel = C'70,230,178';
+         g_styleHeaderText = clrBlack;
+         g_styleWinCard = C'0,145,105';
+         g_styleLossCard = C'180,48,64';
+         g_styleFont = "Arial";
+         g_styleBoldFont = "Arial Bold";
+         g_styleSectionMode = 3;
+         break;
+   }
+}
+
+void ChangePanelStyle(const int direction)
+{
+   g_activePanelStyle += direction;
+   if(g_activePanelStyle > 9) g_activePanelStyle = 0;
+   if(g_activePanelStyle < 0) g_activePanelStyle = 9;
+
+   if(RememberPanelStyleSelection && g_panelStyleMemoryKey != "")
+      GlobalVariableSet(g_panelStyleMemoryKey, (double)g_activePanelStyle);
+
+   ConfigurePanelStyle();
+
+   // Remove mode-specific section stripes that are not used by every style.
+   string sections[6];
+   sections[0] = "SEC_ACCOUNT";
+   sections[1] = "SEC_RISK";
+   sections[2] = "SEC_SIGNAL";
+   sections[3] = "SEC_FILTER";
+   sections[4] = "SEC_EQUITY";
+   sections[5] = "SEC_RESULT";
+   for(int i = 0; i < 6; i++)
+      DeleteObjectIfExists(g_objectPrefix + sections[i] + "_ACCENT");
+
+   g_lastTrackerHistoryCount = -1;
+   g_lastResultCardHistoryCount = -1;
+   g_lastDashboardUpdate = 0;
+   g_lastDashboardStatus = "";
+   UpdateStatusDisplay();
+   ChartRedraw(0);
+}
+
+string PanelStyleText()
+{
+   switch(g_activePanelStyle)
+   {
+      case PANEL_NEON_COMMAND:     return("NEON COMMAND");
+      case PANEL_ROYAL_AURORA:     return("ROYAL AURORA");
+      case PANEL_EMERALD_MATRIX:   return("EMERALD MATRIX");
+      case PANEL_CRIMSON_TACTICAL: return("CRIMSON TACTICAL");
+      case PANEL_ARCTIC_GLASS:     return("ARCTIC GLASS");
+      case PANEL_AMBER_INDUSTRIAL: return("AMBER INDUSTRIAL");
+      case PANEL_ICE_FINTECH:      return("ICE FINTECH");
+      case PANEL_BLACK_GOLD:       return("BLACK GOLD");
+      case PANEL_SPECTRUM_MODULAR: return("SPECTRUM MODULAR");
+      case PANEL_MONO_MINT:        return("MONO MINT");
+   }
+   return("NEON COMMAND");
+}
+
+string PanelSectionTitle(const int section)
+{
+   if(g_activePanelStyle == PANEL_ROYAL_AURORA)
+   {
+      if(section == 0) return("[+] PORTFOLIO");
+      if(section == 1) return("[-] EXPOSURE & MANDATE");
+      if(section == 2) return("[-] AUTOMATION");
+      if(section == 3) return("[-] GUARDS & PROTECTION");
+      if(section == 4) return("[-] PERFORMANCE");
+      return("[-] RETURNS & QUALITY");
+   }
+   if(g_activePanelStyle == PANEL_EMERALD_MATRIX)
+   {
+      if(section == 0) return("> SYS_ACCOUNT");
+      if(section == 1) return("> SYS_RISK");
+      if(section == 2) return("> SYS_SIGNAL");
+      if(section == 3) return("> SYS_PROTECTION");
+      if(section == 4) return("> SYS_PERFORMANCE");
+      return("> SYS_RESULTS");
+   }
+   if(g_activePanelStyle == PANEL_CRIMSON_TACTICAL)
+   {
+      if(section == 0) return("[+] MISSION STATUS");
+      if(section == 1) return("[-] RISK DEFENSE");
+      if(section == 2) return("[-] TARGETING");
+      if(section == 3) return("[-] SAFETY PROTOCOL");
+      if(section == 4) return("[-] AFTER-ACTION REPORT");
+      return("[-] MISSION RESULTS");
+   }
+   if(g_activePanelStyle == PANEL_ARCTIC_GLASS)
+   {
+      if(section == 0) return("[+] CAPITAL GLASS");
+      if(section == 1) return("[-] RISK LENS");
+      if(section == 2) return("[-] LIVE CONDITIONS");
+      if(section == 3) return("[-] PROTECTION");
+      if(section == 4) return("[-] INSIGHTS");
+      return("[-] OUTCOMES");
+   }
+   if(g_activePanelStyle == PANEL_AMBER_INDUSTRIAL)
+   {
+      if(section == 0) return("[+] POWER / ACCOUNT");
+      if(section == 1) return("[-] LOAD / RISK");
+      if(section == 2) return("[-] PROCESS / SIGNAL");
+      if(section == 3) return("[-] SAFETY SYSTEM");
+      if(section == 4) return("[-] OUTPUT / PERFORMANCE");
+      return("[-] PRODUCTION RESULTS");
+   }
+   if(g_activePanelStyle == PANEL_ICE_FINTECH)
+   {
+      if(section == 0) return("[+] ACCOUNT VALUE");
+      if(section == 1) return("[-] ALLOCATION");
+      if(section == 2) return("[-] MARKET READINESS");
+      if(section == 3) return("[-] SAFEGUARDS");
+      if(section == 4) return("[-] PERIOD PERFORMANCE");
+      return("[-] RETURNS OVERVIEW");
+   }
+   if(g_activePanelStyle == PANEL_BLACK_GOLD)
+   {
+      if(section == 0) return("[+] CAPITAL");
+      if(section == 1) return("[-] MANDATE");
+      if(section == 2) return("[-] EXECUTION");
+      if(section == 3) return("[-] PROTECTION");
+      if(section == 4) return("[-] PERFORMANCE LEDGER");
+      return("[-] KEY RATIOS");
+   }
+   if(g_activePanelStyle == PANEL_SPECTRUM_MODULAR)
+   {
+      if(section == 0) return("01 / MONEY");
+      if(section == 1) return("02 / RISK");
+      if(section == 2) return("03 / SIGNAL");
+      if(section == 3) return("04 / SAFETY");
+      if(section == 4) return("05 / EDGE");
+      return("06 / RESULTS");
+   }
+   if(g_activePanelStyle == PANEL_MONO_MINT)
+   {
+      if(section == 0) return("ACCOUNT");
+      if(section == 1) return("TRADE SETUP");
+      if(section == 2) return("SIGNAL");
+      if(section == 3) return("SYSTEM");
+      if(section == 4) return("ANALYTICS");
+      return("OUTCOMES");
+   }
+
+   if(section == 0) return("[+] ACCOUNT CORE");
+   if(section == 1) return("[-] RISK & MONEY ENGINE");
+   if(section == 2) return("[-] SIGNAL RADAR  (closed / live)");
+   if(section == 3) return("[-] FILTERS & PROTECTION");
+   if(section == 4) return("[-] EQUITY / PERFORMANCE");
+   return("[-] RESULT / WINNING");
+}
+
+//+------------------------------------------------------------------+
+//| Professional chart theme                                         |
+//+------------------------------------------------------------------+
+void ApplyProChartTheme()
+{
+   if(!VisualOutputAvailable())
+      return;
+
+   ChartSetInteger(0, CHART_MODE, CHART_CANDLES);
+   ChartSetInteger(0, CHART_SHOW_GRID, false);
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND, ProBackgroundColor);
+   ChartSetInteger(0, CHART_COLOR_FOREGROUND, ProForegroundColor);
+   ChartSetInteger(0, CHART_COLOR_GRID, ProGridColor);
+   ChartSetInteger(0, CHART_COLOR_CHART_UP, ProBullColor);
+   ChartSetInteger(0, CHART_COLOR_CHART_DOWN, ProBearColor);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, ProBullColor);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, ProBearColor);
+   ChartSetInteger(0, CHART_COLOR_CHART_LINE, ProForegroundColor);
+   ChartSetInteger(0, CHART_COLOR_VOLUME,
+                   BlendColor(ProForegroundColor, ProBackgroundColor, 0.35));
+   ChartSetInteger(0, CHART_COLOR_STOP_LEVEL, FailureColor);
+   ChartRedraw(0);
+}
+
+//+------------------------------------------------------------------+
+//| Range, breakout and result objects                               |
+//+------------------------------------------------------------------+
+bool VisualOutputAvailable()
+{
+   if(IsTesting() && !IsVisualMode())
+      return(false);
+   return(true);
+}
+
+bool ShouldDrawShift(const int shift)
+{
+   if(!ShowChartObjects || !VisualOutputAvailable()) return(false);
+   if(VisualHistoryBars <= 0) return(true);
+   return(shift <= VisualHistoryBars);
+}
+
+void DrawRangeZone(const string baseName,
+                   const datetime leftTime,
+                   const datetime rightTime,
+                   const double top,
+                   const double bottom)
+{
+   if(!ShowChartObjects || !VisualOutputAvailable() ||
+      baseName == "" || top <= bottom)
+      return;
+
+   double middle = (top + bottom) * 0.5;
+   color bodyColor = BlendColor(ProForegroundColor,
+                                ProBackgroundColor, 0.10);
+   color upperColor = BlendColor(ProBullColor,
+                                 ProBackgroundColor, 0.23);
+   color lowerColor = BlendColor(ProBearColor,
+                                 ProBackgroundColor, 0.20);
+
+   SetPriceRectangle(baseName + "_BODY", leftTime, top, rightTime,
+                     bottom, bodyColor, true);
+   SetPriceRectangle(baseName + "_UP", leftTime, top, rightTime,
+                     middle, upperColor, true);
+   SetPriceRectangle(baseName + "_DN", leftTime, middle, rightTime,
+                     bottom, lowerColor, true);
+   SetPriceTrend(baseName + "_TOP", leftTime, top, rightTime, top,
+                 ProBullColor, STYLE_DOT, 1);
+   SetPriceTrend(baseName + "_BOTTOM", leftTime, bottom,
+                 rightTime, bottom, ProBearColor, STYLE_DOT, 1);
+}
+
+void DrawBreakoutArrow(const datetime signalTime,
+                       const int shift,
+                       const int direction,
+                       const double rangeTop,
+                       const double rangeBottom,
+                       const bool live)
+{
+   if(!ShowChartObjects || !VisualOutputAvailable())
+      return;
+
+   string key = live ? g_objectPrefix + "LIVE_SIGNAL"
+                     : g_objectPrefix + "SIGNAL_"
+                       + IntegerToString((int)signalTime);
+   double atr = iATR(NULL, 0, SignalATRPeriod, shift);
+   double gap = atr * 0.16;
+   if(gap <= 0.0) gap = MathMax(iHigh(NULL, 0, shift)
+                                  - iLow(NULL, 0, shift), Point * 10) * 0.15;
+   double price = direction > 0
+                  ? iLow(NULL, 0, shift) - gap
+                  : iHigh(NULL, 0, shift) + gap;
+   color arrowColor = direction > 0 ? ProBullColor : ProBearColor;
+
+   SetArrowObject(key + "_ARROW", signalTime, price,
+                  direction > 0 ? 233 : 234, arrowColor, 2);
+   SetPriceText(key + "_TEXT", signalTime,
+                direction > 0 ? price - gap * 0.45 : price + gap * 0.45,
+                direction > 0 ? "RAW BUY BREAKOUT" : "RAW SELL BREAKOUT",
+                arrowColor, 8);
+}
+
+void DrawOutcomeMarker(const datetime signalTime,
+                       const int resultShift,
+                       const int direction,
+                       const bool success)
+{
+   if(!ShowOutcomeMarkers || !ShowChartObjects ||
+      !VisualOutputAvailable())
+      return;
+
+   datetime resultTime = iTime(NULL, 0, resultShift);
+   string base = g_objectPrefix + "RESULT_"
+                 + IntegerToString((int)signalTime);
+   double atr = iATR(NULL, 0, SignalATRPeriod, resultShift);
+   double gap = atr * 0.25;
+   if(gap <= 0.0) gap = MathMax(iHigh(NULL, 0, resultShift)
+                                  - iLow(NULL, 0, resultShift),
+                                  Point * 10) * 0.20;
+   double price = direction > 0
+                  ? iLow(NULL, 0, resultShift) - gap
+                  : iHigh(NULL, 0, resultShift) + gap;
+   color resultColor = success ? SuccessColor : FailureColor;
+
+   SetArrowObject(base + "_ICON", resultTime, price,
+                  success ? 252 : 251, resultColor, 2);
+   SetPriceText(base + "_TEXT", resultTime,
+                direction > 0 ? price - gap * 0.42 : price + gap * 0.42,
+                success ? "RAW NEXT BAR UP/DOWN: MATCH" : "RAW NEXT BAR: MISS",
+                resultColor, 8);
+}
+
+void SetPriceRectangle(const string name,
+                       const datetime leftTime,
+                       const double top,
+                       const datetime rightTime,
+                       const double bottom,
+                       const color objectColor,
+                       const bool inBackground)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_RECTANGLE, 0,
+                   leftTime, top, rightTime, bottom);
+   ObjectMove(0, name, 0, leftTime, top);
+   ObjectMove(0, name, 1, rightTime, bottom);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, objectColor);
+   ObjectSetInteger(0, name, OBJPROP_FILL, true);
+   ObjectSetInteger(0, name, OBJPROP_BACK, inBackground);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+}
+
+void SetPriceTrend(const string name,
+                   const datetime time1,
+                   const double price1,
+                   const datetime time2,
+                   const double price2,
+                   const color lineColor,
+                   const int style,
+                   const int width)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_TREND, 0, time1, price1, time2, price2);
+   ObjectMove(0, name, 0, time1, price1);
+   ObjectMove(0, name, 1, time2, price2);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, lineColor);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+   ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
+   ObjectSetInteger(0, name, OBJPROP_BACK, true);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+}
+
+void SetArrowObject(const string name,
+                    const datetime objectTime,
+                    const double objectPrice,
+                    const int arrowCode,
+                    const color arrowColor,
+                    const int width)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_ARROW, 0, objectTime, objectPrice);
+   ObjectMove(0, name, 0, objectTime, objectPrice);
+   ObjectSetInteger(0, name, OBJPROP_ARROWCODE, arrowCode);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, arrowColor);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+   // Keep price annotations behind the raised screen panels so breakout
+   // labels and result icons never print over the dashboard cards.
+   ObjectSetInteger(0, name, OBJPROP_BACK, true);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+}
+
+void SetPriceText(const string name,
+                  const datetime objectTime,
+                  const double objectPrice,
+                  const string text,
+                  const color textColor,
+                  const int fontSize)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_TEXT, 0, objectTime, objectPrice);
+   ObjectMove(0, name, 0, objectTime, objectPrice);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, name, OBJPROP_BACK, true);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+}
+
+//+------------------------------------------------------------------+
+//| Raised dashboard and raised result card                          |
+//+------------------------------------------------------------------+
+void UpdateStatusDisplay()
+{
+   if(!VisualOutputAvailable())
+      return;
+   if(!ShowEAStatus && !ShowProfitTracker && !ShowClosedTradeResultCards)
+      return;
+
+   datetime updateTime = TimeCurrent();
+   if(updateTime == g_lastDashboardUpdate &&
+      g_status == g_lastDashboardStatus)
+      return;
+   g_lastDashboardUpdate = updateTime;
+   g_lastDashboardStatus = g_status;
+
+   RefreshRates();
+   if(Bars > 1)
+   {
+      g_analysisEnd = TimeCurrent();
+      int months = AnalysisMonths;
+      if(months < 1) months = 1;
+      g_analysisStart = SubtractCalendarMonths(g_analysisEnd, months);
+   }
+   RecalculateOutcomeStatistics();
+   if(ShowEAStatus)
+      DrawMainControlPanel();
+   if(ShowProfitTracker)
+      DrawProfitTrackerCard();
+   if(ShowClosedTradeResultCards)
+      DrawClosedTradeResultCards();
+}
+
+void DrawMainControlPanel()
+{
+   if(UseFuturisticDashboard)
+   {
+      DrawFuturisticPanel();
+      return;
+   }
+   int x = DashboardX;
+   int y = DashboardY;
+   int width = 400;
+   int height = 610;
+   DrawRaisedCard(g_objectPrefix + "MAIN_CARD", x, y, width, height,
+                  g_styleMainHeader,
+                  "RBS v3.10 | " + PanelStyleText());
+   SetCardLabel(g_objectPrefix + "MAIN_MODE", x + 292, y + 10,
+                IntegerToString(g_activePanelStyle + 1) + "/10",
+                g_styleHeaderText, 8, true);
+   SetPanelButton(g_objectPrefix + "STYLE_PREV", x + 337, y + 5,
+                  26, 24, "<", g_styleMainHeader);
+   SetPanelButton(g_objectPrefix + "STYLE_NEXT", x + 366, y + 5,
+                  26, 24, ">", g_styleMainHeader);
+
+   double spread = (Ask - Bid) / Point;
+   double floating = FloatingEAProfit();
+   double nextLot = 0.0;
+   double nextRiskPercent = 0.0;
+   if(LotSizingMode == LOT_BALANCE_STEP_NOMINAL)
+   {
+      nextLot = NormalizeLots(BalanceStepLotSize());
+      nextRiskPercent = NominalRiskForLot(nextLot);
+   }
+   else if(LotSizingMode == LOT_FIXED)
+      nextLot = NormalizeLots(FixedLots);
+   else
+      nextRiskPercent = RiskPercent;
+
+   int trades = 0;
+   int wins = 0;
+   int losses = 0;
+   double netProfit = 0.0;
+   double grossProfit = 0.0;
+   double grossLoss = 0.0;
+   double totalLots = 0.0;
+   double averageWin = 0.0;
+   double averageLoss = 0.0;
+   GetPerformanceStatistics(trades, wins, losses, netProfit,
+                            grossProfit, grossLoss, totalLots,
+                            averageWin, averageLoss);
+   double winRate = OutcomeRate(wins, trades);
+   double profitFactor = grossLoss < 0.0
+                         ? grossProfit / MathAbs(grossLoss) : 0.0;
+   double expectancy = trades > 0 ? netProfit / trades : 0.0;
+
+   int sectionY = y + 39;
+   DrawPanelSection(g_objectPrefix + "SEC_ACCOUNT", x, sectionY, width,
+                    g_styleAccount, PanelSectionTitle(0));
+   int rowY = sectionY + 22;
+   DrawPanelRow("A0", x, rowY, "Balance",
+                DoubleToString(AccountBalance(), 2), ProBullColor);
+   DrawPanelRow("A1", x, rowY + 16, "Equity",
+                DoubleToString(AccountEquity(), 2), ProBullColor);
+   DrawPanelRow("A2", x, rowY + 32, "Margin / Free",
+                DoubleToString(AccountMargin(), 2) + " / "
+                + DoubleToString(AccountFreeMargin(), 2), g_styleText);
+   DrawPanelRow("A3", x, rowY + 48, "Floating EA",
+                SignedNumber(floating, 2),
+                floating >= 0.0 ? SuccessColor : FailureColor);
+   DrawPanelRow("A4", x, rowY + 64, "Today",
+                SignedNumber(g_dailyNetResult, 2) + "  (limit "
+                + DoubleToString(MaximumDailyLossPercent, 1) + "%)",
+                g_dailyNetResult >= 0.0 ? SuccessColor : FailureColor);
+
+   sectionY = y + 144;
+   DrawPanelSection(g_objectPrefix + "SEC_RISK", x, sectionY, width,
+                    g_styleRisk, PanelSectionTitle(1));
+   rowY = sectionY + 22;
+   DrawPanelRow("K0", x, rowY, "Next lot",
+                LotSizingMode == LOT_RISK_PERCENT
+                ? "dynamic by SL" : DoubleToString(nextLot, LotDigits()),
+                C'255,215,0');
+   DrawPanelRow("K1", x, rowY + 16, "Risk at SL",
+                DoubleToString(nextRiskPercent, 1) + "%  /  "
+                + DoubleToString(AccountBalance() * nextRiskPercent / 100.0, 2),
+                FailureColor);
+   DrawPanelRow("K2", x, rowY + 32, "Lot rule",
+                LotSizingMode == LOT_BALANCE_STEP_NOMINAL
+                ? "+" + DoubleToString(LotIncrementPerStep, 2)
+                  + " each $" + DoubleToString(BalanceProfitStep, 0)
+                : (LotSizingMode == LOT_FIXED ? "fixed" : "exact % risk"),
+                g_styleText);
+   DrawPanelRow("K3", x, rowY + 48, "SL / TP",
+                ExitMethodText() + "  R:R " + DoubleToString(RiskRewardRatio, 2),
+                g_styleText);
+   DrawPanelRow("K4", x, rowY + 64, "Trailing",
+                EnableTrailingStop
+                ? IntegerToString(TrailingStartPoints) + " / "
+                  + IntegerToString(TrailingDistancePoints) + " / "
+                  + IntegerToString(TrailingStepPoints) + " pts"
+                : "OFF", ProBullColor);
+   DrawPanelRow("K5", x, rowY + 80, "Spread filter",
+                DoubleToString(spread, 1) + " / "
+                + IntegerToString(MaximumSpreadPoints) + " pts",
+                (MaximumSpreadPoints <= 0 || spread <= MaximumSpreadPoints)
+                ? SuccessColor : FailureColor);
+
+   sectionY = y + 266;
+   DrawPanelSection(g_objectPrefix + "SEC_SIGNAL", x, sectionY, width,
+                    g_styleSignal, PanelSectionTitle(2));
+   rowY = sectionY + 22;
+   DrawPanelRow("S0", x, rowY, "Range state",
+                g_rangeActive ? "ACTIVE" : "WAITING",
+                g_rangeActive ? SuccessColor : C'255,215,0');
+   DrawPanelRow("S1", x, rowY + 16, "Range bounds",
+                g_rangeActive
+                ? DoubleToString(g_rangeBottom, Digits) + " - "
+                  + DoubleToString(g_rangeTop, Digits)
+                : "none", g_styleText);
+   DrawPanelRow("S2", x, rowY + 32, "Entry / signal",
+                (EntryTiming == ENTRY_AFTER_BAR_CLOSE ? "closed"
+                 : (EntryTiming == ENTRY_IMMEDIATELY ? "arrow"
+                                                    : "arrow+close"))
+                + " / "
+                + (SignalMode == TRADE_ALL_BREAKOUTS ? "all" : "volume"),
+                ProBullColor);
+   DrawPanelRow("S3", x, rowY + 48, "Last status",
+                ShortText(g_status, 35), g_styleText);
+
+   sectionY = y + 354;
+   DrawPanelSection(g_objectPrefix + "SEC_FILTER", x, sectionY, width,
+                    g_styleFilter, PanelSectionTitle(3));
+   rowY = sectionY + 22;
+   double volatility = Bars > SignalRangeLength + 2
+                       ? CalculateVolatility(0) : 0.0;
+   DrawPanelRow("F0", x, rowY, "Volatility",
+                DoubleToString(volatility, 3) + " / "
+                + DoubleToString(SignalVolatilityThreshold, 2),
+                volatility < SignalVolatilityThreshold
+                ? SuccessColor : g_styleText);
+   DrawPanelRow("F1", x, rowY + 16, "Lower timeframe",
+                TimeframeText((int)SignalLowerTimeframe), g_styleText);
+   DrawPanelRow("F2", x, rowY + 32, "Daily loss lock",
+                g_dailyLossBlocked ? "BLOCKED" : "PASS",
+                g_dailyLossBlocked ? FailureColor : SuccessColor);
+   DrawPanelRow("F3", x, rowY + 48, "Trade permission",
+                IsTradeAllowed() ? "PASS" : "OFF",
+                IsTradeAllowed() ? SuccessColor : FailureColor);
+
+   sectionY = y + 442;
+   DrawPanelSection(g_objectPrefix + "SEC_EQUITY", x, sectionY, width,
+                    g_styleEquity, PanelSectionTitle(4));
+   rowY = sectionY + 22;
+   DrawPanelRow("E0", x, rowY, "Closed net / trades",
+                SignedNumber(netProfit, 2) + " / " + IntegerToString(trades),
+                netProfit >= 0.0 ? SuccessColor : FailureColor);
+   DrawPanelRow("E1", x, rowY + 16, "Profit factor",
+                DoubleToString(profitFactor, 2),
+                profitFactor >= 1.0 ? SuccessColor : FailureColor);
+   DrawPanelRow("E2", x, rowY + 32, "Avg win / loss",
+                SignedNumber(averageWin, 2) + " / "
+                + SignedNumber(averageLoss, 2), g_styleText);
+   DrawPanelRow("E3", x, rowY + 48, "Expectancy / lots",
+                SignedNumber(expectancy, 2) + " / "
+                + DoubleToString(totalLots, 2), g_styleText);
+
+   sectionY = y + 530;
+   DrawPanelSection(g_objectPrefix + "SEC_RESULT", x, sectionY, width,
+                    g_styleResult, PanelSectionTitle(5));
+   rowY = sectionY + 22;
+   DrawPanelRow("R0L", x, rowY, "Trades W / L",
+                IntegerToString(trades) + "  " + IntegerToString(wins)
+                + " / " + IntegerToString(losses), g_styleText);
+   DrawPanelRow("R1L", x, rowY + 16, "Win rate",
+                DoubleToString(winRate, 1) + "%",
+                winRate >= 50.0 ? SuccessColor : FailureColor);
+   DrawLastTradeStrip(x + 205, rowY + 34, 10);
+}
+
+// Futuristic HUD uses native MT4 objects, no DLLs or external assets.
+void DrawHUDRow(const int row, const string label, const string value,
+                const color valueColor)
+{
+   string base = g_objectPrefix + "FUT_ROW" + IntegerToString(row);
+   int y = DashboardY + 213 + row * 29;
+   SetScreenRectangle(base + "_BG", DashboardX + 12, y - 3, 376, 26,
+                      BlendColor(g_styleMainHeader, g_styleBody, row % 2 == 0 ? 0.09 : 0.03),
+                      g_styleBody, 3);
+   SetCardLabel(base + "_L", DashboardX + 20, y, label, g_styleLabel, 8, false);
+   SetCardLabel(base + "_V", DashboardX + 187, y, ShortText(value, 27), valueColor, 8, true);
+   ObjectSetString(0, base + "_V", OBJPROP_TOOLTIP, value);
+}
+
+void DrawHUDTile(const string key, const int x, const int y,
+                 const string label, const string value, const color accent)
+{
+   string base = g_objectPrefix + "FUT_TILE" + key;
+   SetScreenRectangle(base + "_BG", x, y, 182, 51,
+                      BlendColor(accent, g_styleBody, 0.09), g_styleBorder, 3);
+   SetScreenRectangle(base + "_EDGE", x, y, 3, 51, accent, accent, 4);
+   SetCardLabel(base + "_L", x + 12, y + 6, label, g_styleLabel, 8, false);
+   SetCardLabel(base + "_V", x + 12, y + 23, value, accent, 12, true);
+}
+
+void DrawFuturisticPanel()
+{
+   int x = DashboardX, y = DashboardY;
+   string base = g_objectPrefix + "FUT_";
+   color accent = g_styleEquity;
+   DrawRaisedCard(base + "CARD", x, y, 400, 610,
+                  BlendColor(accent, g_styleBody, 0.22), "RBS / QUANT HUD 3.10");
+   SetScreenRectangle(base + "TOP", x, y, 400, 2, accent, accent, 4);
+   SetPanelButton(g_objectPrefix + "STYLE_PREV", x + 337, y + 6, 26, 24, "<", g_styleMainHeader);
+   SetPanelButton(g_objectPrefix + "STYLE_NEXT", x + 366, y + 6, 26, 24, ">", g_styleMainHeader);
+   for(int tab = 0; tab < 3; tab++)
+   {
+      string title = tab == 0 ? "OVERVIEW" : (tab == 1 ? "FILTERS" : "RESULTS");
+      SetPanelButton(base + "TAB" + IntegerToString(tab), x + 12 + tab * 126,
+                     y + 44, 122, 25, title,
+                     tab == g_dashboardTab ? accent : g_styleBorder);
+      ObjectSetString(0, base + "TAB" + IntegerToString(tab), OBJPROP_TOOLTIP, "Show " + title);
+   }
+   DrawHUDTile("EQ", x + 12, y + 80, "EQUITY / " + AccountCurrency(),
+                DoubleToString(AccountEquity(), 2), accent);
+   DrawHUDTile("DAY", x + 206, y + 80, "TODAY / MAGIC SCOPE",
+                SignedNumber(g_dailyNetResult, 2), g_dailyNetResult < 0 ? FailureColor : SuccessColor);
+   double spread = Point > 0.0 ? (Ask - Bid) / Point : 0.0;
+   DrawHUDTile("SP", x + 12, y + 141, "SPREAD / BROKER POINTS",
+                DoubleToString(spread, 0), MaximumSpreadPoints > 0 && spread > MaximumSpreadPoints ? FailureColor : accent);
+   int seconds = (int)(iTime(NULL, 0, 0) + PeriodSeconds() - TimeCurrent());
+   if(seconds < 0) seconds = 0;
+   DrawHUDTile("BAR", x + 206, y + 141, Symbol() + " / " + TimeframeText(Period()),
+                "BAR " + IntegerToString(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "")
+                + IntegerToString(seconds % 60), g_styleText);
+
+   if(g_dashboardTab == 0)
+   {
+      DrawHUDRow(0, "Execution", g_dailyLossBlocked ? "DAILY LOCK" :
+                 (g_entriesPaused ? "ENTRIES PAUSED" : (IsTradeAllowed() ? "ENABLED" : "AUTOTRADING OFF")),
+                 g_dailyLossBlocked || g_entriesPaused || !IsTradeAllowed() ? FailureColor : SuccessColor);
+      DrawHUDRow(1, "Risk sizing", LotSizingMode == LOT_RISK_PERCENT ? DoubleToString(RiskPercent, 2) + "% equity"
+                 : (LotSizingMode == LOT_FIXED ? "FIXED LOT" : "BALANCE TIERS"), g_styleText);
+      DrawHUDRow(2, "Open / max", IntegerToString(CountOpenPositions(0)) + " / " + IntegerToString(MaxOpenPositions), accent);
+      DrawHUDRow(3, "Range", g_rangeActive ? DoubleToString(g_rangeBottom, Digits) + " - "
+                 + DoubleToString(g_rangeTop, Digits) : "Waiting", g_styleText);
+      DrawHUDRow(4, "Exit / reward", ExitMethodText() + " / " + DoubleToString(RiskRewardRatio, 2), g_styleText);
+      DrawHUDRow(5, "Point / digits", DoubleToString(Point, Digits) + " / " + IntegerToString(Digits), accent);
+      DrawHUDRow(6, "Session (server)", EnableSessionFilter ? IntegerToString(SessionStartHour) + ":00 - "
+                 + IntegerToString(SessionEndHour) + ":00" : "ALL HOURS", InEntrySession() ? SuccessColor : FailureColor);
+      DrawHUDRow(7, "Commission / lot", DoubleToString(EstimatedRoundTurnCommissionPerLot, 2) + " " + AccountCurrency(), g_styleText);
+      DrawHUDRow(8, "Theme", PanelStyleText(), accent);
+   }
+   else if(g_dashboardTab == 1)
+   {
+      DrawHUDRow(0, "Last signal gate", g_qualityStatus, g_qualityPassed ? SuccessColor : FailureColor);
+      DrawHUDRow(1, "Quality / closed", (EnableQualityFilter ? "ON" : "OFF") + string(RequireClosedSignalBar ? " / CLOSED" : " / LIVE ALLOWED"), accent);
+      DrawHUDRow(2, "Trend EMA", EnableTrendFilter ? TimeframeText((int)TrendTimeframe) + " "
+                 + IntegerToString(TrendFastEMA) + "/" + IntegerToString(TrendSlowEMA) : "OFF", g_styleText);
+      DrawHUDRow(3, "ADX minimum", EnableADXFilter ? DoubleToString(MinimumADX, 1) + " + DI direction" : "OFF", g_styleText);
+      DrawHUDRow(4, "Body / wick", DoubleToString(100 * MinimumBodyFraction, 0) + "% min / "
+                 + DoubleToString(100 * MaximumRejectionWickFraction, 0) + "% max", g_styleText);
+      DrawHUDRow(5, "Breakout / ATR", DoubleToString(BreakoutBufferATR, 2) + " - "
+                 + DoubleToString(MaximumBreakoutExtensionATR, 2), g_styleText);
+      DrawHUDRow(6, "Spike range / ATR", DoubleToString(MaximumSignalRangeATR, 2) + " max", g_styleText);
+      DrawHUDRow(7, "Spread / ATR cap", MaximumSpreadATR > 0 ? DoubleToString(100 * MaximumSpreadATR, 1) + "%" : "OFF", g_styleText);
+      DrawHUDRow(8, "Chart annotations", "RAW / before entry filters", g_styleLabel);
+   }
+   else
+   {
+      int trades, wins, losses;
+      double net, grossWin, grossLoss, lots, avgWin, avgLoss;
+      GetPerformanceStatistics(trades, wins, losses, net, grossWin, grossLoss, lots, avgWin, avgLoss);
+      DrawHUDRow(0, "History scope", TrackerAllSymbolsWithMagic ? "ALL SYMBOLS / MAGIC" : "CHART SYMBOL / MAGIC", accent);
+      DrawHUDRow(1, "Closed net", SignedNumber(net, 2) + " " + AccountCurrency(), net >= 0 ? SuccessColor : FailureColor);
+      DrawHUDRow(2, "Trades / wins", IntegerToString(trades) + " / " + IntegerToString(wins), g_styleText);
+      DrawHUDRow(3, "Trade win rate", trades > 0 ? DoubleToString(OutcomeRate(wins, trades), 1) + "%" : "N/A", g_styleText);
+      DrawHUDRow(4, "Profit factor", grossLoss < 0 ? DoubleToString(grossWin / MathAbs(grossLoss), 2) : "N/A (no losses)", accent);
+      DrawHUDRow(5, "Expectancy", trades > 0 ? SignedNumber(net / trades, 2) : "N/A", g_styleText);
+      DrawHUDRow(6, "Avg win / loss", SignedNumber(avgWin, 2) + " / " + SignedNumber(avgLoss, 2), g_styleText);
+      DrawHUDRow(7, "Raw next-bar match", IntegerToString(g_successfulOutcomes) + " / " + IntegerToString(g_totalOutcomes), g_styleLabel);
+      DrawHUDRow(8, "Raw != trade win rate", "Not a backtest", g_styleLabel);
+   }
+   double budget = g_dailyStartBalance * MaximumDailyLossPercent / 100.0;
+   double used = EnableDailyLossLimit && budget > 0 ? MathMin(1.0, MathMax(0.0, -g_dailyNetResult / budget)) : 0.0;
+   SetCardLabel(base + "BUDGET", x + 16, y + 478,
+                EnableDailyLossLimit ? "DAILY LOSS BUDGET USED: " + DoubleToString(100 * used, 0) + "%" : "DAILY LOSS LIMIT OFF",
+                g_styleLabel, 8, false);
+   SetScreenRectangle(base + "METER", x + 16, y + 500, 368, 5, g_styleBorder, g_styleBorder, 4);
+   if(used > 0)
+      SetScreenRectangle(base + "FILL", x + 16, y + 500, (int)MathMax(1, 368 * used), 5,
+                         used >= 0.8 ? FailureColor : accent, accent, 5);
+   else DeleteObjectIfExists(base + "FILL");
+   SetPanelButton(base + "PAUSE", x + 16, y + 522, 368, 28,
+                  g_entriesPaused ? "RESUME NEW ENTRIES" : "PAUSE NEW ENTRIES", g_entriesPaused ? g_styleFilter : accent);
+   ObjectSetString(0, base + "PAUSE", OBJPROP_TOOLTIP, "Session-local toggle. Exits and protective management stay active.");
+   SetCardLabel(base + "STATUS", x + 16, y + 563, ShortText(g_status, 55), g_styleText, 8, false);
+   ObjectSetString(0, base + "STATUS", OBJPROP_TOOLTIP, g_status);
+   SetCardLabel(base + "FOOT", x + 16, y + 587, "DEMO VALIDATE / FILTERS DO NOT GUARANTEE WINS", g_styleLabel, 7, false);
+}
+
+void DrawPanelSection(const string name,
+                      const int x,
+                      const int y,
+                      const int width,
+                      const color sectionColor,
+                      const string title)
+{
+   if(g_styleSectionMode == 1)
+   {
+      SetScreenRectangle(name + "_BG", x + 1, y, width - 2, 18,
+                         BlendColor(sectionColor, g_styleBody, 0.16),
+                         g_styleBorder, 4);
+      SetScreenRectangle(name + "_ACCENT", x + 1, y, 5, 18,
+                         sectionColor, sectionColor, 5);
+      SetCardLabel(name + "_TXT", x + 11, y + 2,
+                   title, sectionColor, 9, true);
+   }
+   else if(g_styleSectionMode == 2)
+   {
+      SetScreenRectangle(name + "_BG", x + 3, y, width - 6, 18,
+                         BlendColor(sectionColor, g_styleBody, 0.10),
+                         sectionColor, 4);
+      SetCardLabel(name + "_TXT", x + 10, y + 2,
+                   title, g_styleText, 8, true);
+   }
+   else if(g_styleSectionMode == 3)
+   {
+      SetScreenRectangle(name + "_BG", x + 1, y + 16, width - 2, 2,
+                         sectionColor, sectionColor, 4);
+      SetCardLabel(name + "_TXT", x + 8, y,
+                   title, sectionColor, 9, true);
+   }
+   else
+   {
+      SetScreenRectangle(name + "_BG", x + 1, y, width - 2, 18,
+                         sectionColor, sectionColor, 4);
+      SetCardLabel(name + "_TXT", x + 8, y + 2,
+                   title, clrWhite, 8, true);
+   }
+}
+
+void DrawPanelRow(const string suffix,
+                  const int x,
+                  const int y,
+                  const string label,
+                  const string value,
+                  const color valueColor)
+{
+   string base = g_objectPrefix + "MAIN_ROW_" + suffix;
+   SetCardLabel(base + "_L", x + 9, y, label,
+                g_styleLabel, 7, false);
+   SetCardLabel(base + "_V", x + 175, y, value,
+                valueColor, 7, true);
+}
+
+void GetPerformanceStatistics(int &trades,
+                              int &wins,
+                              int &losses,
+                              double &netProfit,
+                              double &grossProfit,
+                              double &grossLoss,
+                              double &totalLots,
+                              double &averageWin,
+                              double &averageLoss)
+{
+   trades = 0; wins = 0; losses = 0;
+   netProfit = 0.0; grossProfit = 0.0; grossLoss = 0.0;
+   totalLots = 0.0; averageWin = 0.0; averageLoss = 0.0;
+   for(int i = OrdersHistoryTotal() - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
+      if(OrderMagicNumber() != MagicNumber) continue;
+      if(!TrackerAllSymbolsWithMagic && OrderSymbol() != Symbol()) continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
+      double result = OrderProfit() + OrderSwap() + OrderCommission();
+      trades++;
+      totalLots += OrderLots();
+      netProfit += result;
+      if(result > 0.0) { wins++; grossProfit += result; }
+      else { losses++; grossLoss += result; }
+   }
+   if(wins > 0) averageWin = grossProfit / wins;
+   if(losses > 0) averageLoss = grossLoss / losses;
+}
+
+void DrawLastTradeStrip(const int x,
+                        const int y,
+                        const int maximumTrades)
+{
+   int drawn = 0;
+   for(int i = OrdersHistoryTotal() - 1; i >= 0 && drawn < maximumTrades; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
+      if(OrderMagicNumber() != MagicNumber) continue;
+      if(!TrackerAllSymbolsWithMagic && OrderSymbol() != Symbol()) continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
+      double result = OrderProfit() + OrderSwap() + OrderCommission();
+      color boxColor = result > 0.0 ? SuccessColor : FailureColor;
+      SetScreenRectangle(g_objectPrefix + "LAST_BOX_" + IntegerToString(drawn),
+                         x + drawn * 17, y, 13, 8,
+                         boxColor, boxColor, 6);
+      drawn++;
+   }
+   for(int j = drawn; j < maximumTrades; j++)
+      DeleteObjectIfExists(g_objectPrefix + "LAST_BOX_" + IntegerToString(j));
+}
+
+void DrawClosedTradeResultCards()
+{
+   int historyCount = OrdersHistoryTotal();
+   if(historyCount == g_lastResultCardHistoryCount)
+      return;
+   g_lastResultCardHistoryCount = historyCount;
+
+   string cardPrefix = g_objectPrefix + "TRADE_CARD_";
+   DeleteObjectsWithPrefix(cardPrefix);
+
+   long chartWidth = 0;
+   long chartHeight = 0;
+   ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0, chartWidth);
+   ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0, chartHeight);
+   if(chartWidth < 300 || chartHeight < 180)
+   {
+      g_lastResultCardHistoryCount = -1;
+      return;
+   }
+
+   int cardWidth = ClosedTradeCardWidth;
+   int cardHeight = ClosedTradeCardHeight;
+   int leftLimit = 6;
+   if(ShowEAStatus)
+      leftLimit = DashboardX + 400 + 10;
+   int rightLimit = (int)chartWidth - 6;
+   if(ShowProfitTracker)
+   {
+      int trackerMargin = ProfitTrackerRightMargin;
+      if(trackerMargin < 5) trackerMargin = 5;
+      if(trackerMargin > 160) trackerMargin = 160;
+      rightLimit = (int)chartWidth - trackerMargin - 395 - 10;
+   }
+   if(rightLimit - leftLimit < cardWidth)
+      return;
+
+   int usedX[];
+   int usedY[];
+   int drawn = 0;
+
+   // Draw every matching closed trade whose close point is currently visible
+   // in the center chart area. Scrolling/zooming triggers a complete redraw.
+   for(int i = historyCount - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY))
+         continue;
+      if(OrderMagicNumber() != MagicNumber || OrderSymbol() != Symbol())
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+      if(OrderCloseTime() <= 0)
+         continue;
+
+      int anchorX = 0;
+      int anchorY = 0;
+      if(!ChartTimePriceToXY(0, 0, OrderCloseTime(), OrderClosePrice(),
+                             anchorX, anchorY))
+         continue;
+      if(anchorX < leftLimit || anchorX > rightLimit ||
+         anchorY < 0 || anchorY >= (int)chartHeight)
+         continue;
+
+      int cardX = anchorX - cardWidth / 2;
+      if(cardX < leftLimit) cardX = leftLimit;
+      if(cardX + cardWidth > rightLimit) cardX = rightLimit - cardWidth;
+      int baseY = anchorY + ClosedTradeCardOffsetY;
+      if(baseY + cardHeight > (int)chartHeight - 5)
+         baseY = anchorY - cardHeight - ClosedTradeCardOffsetY;
+      if(baseY < 5) baseY = 5;
+
+      int cardY = baseY;
+      bool placed = false;
+      for(int attempt = 0; attempt < 14; attempt++)
+      {
+         if(attempt > 0)
+         {
+            int level = (attempt + 1) / 2;
+            int direction = (attempt % 2 == 1) ? 1 : -1;
+            cardY = baseY + direction * level * (cardHeight + 5);
+            if(cardY < 5) cardY = 5;
+            if(cardY + cardHeight > (int)chartHeight - 5)
+               cardY = (int)chartHeight - cardHeight - 5;
+         }
+
+         bool overlap = false;
+         for(int r = 0; r < drawn; r++)
+         {
+            if(cardX < usedX[r] + cardWidth + 4 &&
+               cardX + cardWidth + 4 > usedX[r] &&
+               cardY < usedY[r] + cardHeight + 4 &&
+               cardY + cardHeight + 4 > usedY[r])
+            {
+               overlap = true;
+               break;
+            }
+         }
+         if(!overlap)
+         {
+            placed = true;
+            break;
+         }
+      }
+      // When a very crowded chart has no free slot, retain the card at its
+      // close-point position rather than hiding a requested trade result.
+      if(!placed) cardY = baseY;
+
+      double netResult = OrderProfit() + OrderSwap() + OrderCommission();
+      double pointResult = OrderType() == OP_BUY
+                           ? (OrderClosePrice() - OrderOpenPrice()) / Point
+                           : (OrderOpenPrice() - OrderClosePrice()) / Point;
+      int roundedPoints = (int)MathRound(pointResult);
+      string outcome = netResult > 0.0 ? "WIN"
+                       : (netResult < 0.0 ? "LOSS" : "FLAT");
+      string title = outcome + "  " + SignedNumber(netResult, 2);
+      string detail = (OrderType() == OP_BUY ? "BUY " : "SELL ")
+                      + DoubleToString(OrderLots(), LotDigits()) + "  "
+                      + (roundedPoints > 0 ? "+" : "")
+                      + IntegerToString(roundedPoints) + " pts";
+      color cardColor = netResult >= 0.0
+                        ? g_styleWinCard : g_styleLossCard;
+      string base = cardPrefix + IntegerToString(OrderTicket());
+
+      SetScreenRectangle(base + "_SHADOW", cardX + 4, cardY + 5,
+                         cardWidth, cardHeight,
+                         BlendColor(clrBlack, g_styleBody, 0.88),
+                         BlendColor(clrBlack, g_styleBody, 0.88), 6);
+      SetScreenRectangle(base + "_BODY", cardX, cardY,
+                         cardWidth, cardHeight,
+                         BlendColor(cardColor, g_styleBody, 0.72),
+                         BlendColor(clrWhite, cardColor, 0.38), 7);
+      SetScreenRectangle(base + "_HEAD", cardX + 2, cardY + 2,
+                         cardWidth - 4, 21,
+                         cardColor, cardColor, 8);
+      SetScreenRectangle(base + "_DOT", anchorX - 2, anchorY - 2,
+                         5, 5, cardColor, clrWhite, 9);
+      SetCardLabel(base + "_TITLE", cardX + 8, cardY + 4,
+                   title, clrWhite, 10, true);
+      SetCardLabel(base + "_DETAIL", cardX + 8, cardY + 26,
+                   detail, clrWhite, 7, true);
+      ObjectSetInteger(0, base + "_TITLE", OBJPROP_ZORDER, 10);
+      ObjectSetInteger(0, base + "_DETAIL", OBJPROP_ZORDER, 10);
+
+      ArrayResize(usedX, drawn + 1);
+      ArrayResize(usedY, drawn + 1);
+      usedX[drawn] = cardX;
+      usedY[drawn] = cardY;
+      drawn++;
+   }
+}
+
+void DrawProfitTrackerCard()
+{
+   if(!ShowProfitTracker || !VisualOutputAvailable())
+      return;
+
+   int currentHistoryCount = OrdersHistoryTotal();
+   int currentDayKey = BrokerDayKey(TimeCurrent());
+   if(currentHistoryCount == g_lastTrackerHistoryCount &&
+      currentDayKey == g_lastTrackerDayKey)
+      return;
+   g_lastTrackerHistoryCount = currentHistoryCount;
+   g_lastTrackerDayKey = currentDayKey;
+
+   int days = ProfitTrackerDays;
+   if(days < 1) days = 1;
+   if(days > 60) days = 60;
+
+   double dayLots[];
+   double dayProfit[];
+   int dayTrades[];
+   int dayWins[];
+   int dayLosses[];
+   ArrayResize(dayLots, days);
+   ArrayResize(dayProfit, days);
+   ArrayResize(dayTrades, days);
+   ArrayResize(dayWins, days);
+   ArrayResize(dayLosses, days);
+   ArrayInitialize(dayLots, 0.0);
+   ArrayInitialize(dayProfit, 0.0);
+   ArrayInitialize(dayTrades, 0);
+   ArrayInitialize(dayWins, 0);
+   ArrayInitialize(dayLosses, 0);
+
+   datetime todayStart = BrokerDayStart(TimeCurrent());
+   datetime weeklyStart = todayStart - 6 * 86400;
+   datetime monthlyStart = todayStart - 29 * 86400;
+   MqlDateTime calendarParts;
+   TimeToStruct(todayStart, calendarParts);
+   int sinceMonday = (calendarParts.day_of_week + 6) % 7;
+   datetime thisWeekStart = todayStart - sinceMonday * 86400;
+   calendarParts.day = 1;
+   datetime thisMonthStart = StructToTime(calendarParts);
+
+   int weeklyTrades = 0, weeklyWins = 0, weeklyLosses = 0;
+   double weeklyProfit = 0.0, weeklyLots = 0.0;
+   int monthlyTrades = 0, monthlyWins = 0, monthlyLosses = 0;
+   double monthlyProfit = 0.0, monthlyLots = 0.0;
+   int thisWeekTrades = 0, thisWeekWins = 0, thisWeekLosses = 0;
+   double thisWeekProfit = 0.0, thisWeekLots = 0.0;
+   int thisMonthTrades = 0, thisMonthWins = 0, thisMonthLosses = 0;
+   double thisMonthProfit = 0.0, thisMonthLots = 0.0;
+   int totalTrades = 0, totalWins = 0, totalLosses = 0;
+   double totalProfit = 0.0, totalLots = 0.0;
+
+   for(int h = OrdersHistoryTotal() - 1; h >= 0; h--)
+   {
+      if(!OrderSelect(h, SELECT_BY_POS, MODE_HISTORY))
+         continue;
+      if(OrderMagicNumber() != MagicNumber)
+         continue;
+      if(!TrackerAllSymbolsWithMagic && OrderSymbol() != Symbol())
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+
+      datetime closeTime = OrderCloseTime();
+      double result = OrderProfit() + OrderSwap() + OrderCommission();
+      bool win = (result > 0.0);
+
+      totalTrades++;
+      totalProfit += result;
+      totalLots += OrderLots();
+      if(win) totalWins++; else totalLosses++;
+
+      if(closeTime >= weeklyStart)
+      {
+         weeklyTrades++;
+         weeklyProfit += result;
+         weeklyLots += OrderLots();
+         if(win) weeklyWins++; else weeklyLosses++;
+      }
+      if(closeTime >= monthlyStart)
+      {
+         monthlyTrades++;
+         monthlyProfit += result;
+         monthlyLots += OrderLots();
+         if(win) monthlyWins++; else monthlyLosses++;
+      }
+      if(closeTime >= thisWeekStart)
+      {
+         thisWeekTrades++;
+         thisWeekProfit += result;
+         thisWeekLots += OrderLots();
+         if(win) thisWeekWins++; else thisWeekLosses++;
+      }
+      if(closeTime >= thisMonthStart)
+      {
+         thisMonthTrades++;
+         thisMonthProfit += result;
+         thisMonthLots += OrderLots();
+         if(win) thisMonthWins++; else thisMonthLosses++;
+      }
+
+      for(int d = 0; d < days; d++)
+      {
+         datetime dayStart = todayStart - d * 86400;
+         datetime dayEnd = dayStart + 86400;
+         if(closeTime >= dayStart && closeTime < dayEnd)
+         {
+            dayLots[d] += OrderLots();
+            dayProfit[d] += result;
+            dayTrades[d]++;
+            if(win) dayWins[d]++; else dayLosses[d]++;
+            break;
+         }
+      }
+   }
+
+   // Always show today, then only historical dates containing closed trades.
+   // The row cap adapts to the selected header/font sizes so all six analysis
+   // lines always remain inside the fixed 610-pixel panel.
+   int headerHeight = ProfitTrackerHeaderHeight;
+   int trackerFont = ProfitTrackerFontSize;
+   int rowHeight = trackerFont + 4;
+   int analysisSpacing = trackerFont + 9;
+   int maximumDailyRows = (610 - headerHeight - 105
+                           - 5 * analysisSpacing - trackerFont) / rowHeight;
+   if(maximumDailyRows < 1) maximumDailyRows = 1;
+   if(maximumDailyRows > 30) maximumDailyRows = 30;
+   int displayedRows = 1;
+   for(int activeDay = 1; activeDay < days; activeDay++)
+   {
+      if(dayTrades[activeDay] > 0 && displayedRows < maximumDailyRows)
+         displayedRows++;
+   }
+
+   // 440 - 45 = 395 pixels, as requested.
+   int panelWidth = 395;
+   int rightMargin = ProfitTrackerRightMargin;
+   if(rightMargin < 5) rightMargin = 5;
+   if(rightMargin > 160) rightMargin = 160;
+   int y = ProfitTrackerY;
+   long chartWidthPixels = 0;
+   ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0, chartWidthPixels);
+   if(chartWidthPixels < panelWidth + rightMargin + 20)
+   {
+      DeleteObjectsWithPrefix(g_objectPrefix + "TRACK");
+      DeleteObjectsWithPrefix(g_objectPrefix + "ANALYSIS_ROW_");
+      g_lastTrackerHistoryCount = -1;
+      return;
+   }
+   int x = (int)chartWidthPixels - rightMargin - panelWidth;
+   if(ShowEAStatus && x < DashboardX + 420)
+   {
+      // Avoid overlaying the command HUD on narrow charts.
+      DeleteObjectsWithPrefix(g_objectPrefix + "TRACK");
+      DeleteObjectsWithPrefix(g_objectPrefix + "ANALYSIS_ROW_");
+      g_lastTrackerHistoryCount = -1;
+      return;
+   }
+   if(x < 5) x = 5;
+   int textX = x + 10;
+   int columnHeaderY = y + headerHeight + 2;
+   int rowStartY = columnHeaderY + 27;
+   int totalY = rowStartY + displayedRows * rowHeight + 4;
+   int analysisHeaderY = totalY + 23;
+   int analysisColumnsY = analysisHeaderY + 22;
+   int analysisRowsY = analysisColumnsY + 21;
+   // Match the 610-pixel height of the main dashboard at all times.
+   int cardHeight = 610;
+
+   DrawRaisedCardWithHeader(g_objectPrefix + "TRACKER_CARD", x, y,
+                            panelWidth, cardHeight, headerHeight,
+                            g_styleTrackerHeader,
+                            "RBS / PERFORMANCE ("
+                            + IntegerToString(days) + "D)");
+   SetCardLabel(g_objectPrefix + "TRACK_SYMBOL",
+                x + panelWidth - 68, y + 18,
+                TrackerAllSymbolsWithMagic ? "ALL" : ShortText(Symbol(), 9),
+                UseFuturisticDashboard ? g_styleText : g_styleHeaderText, trackerFont, true);
+   SetScreenRectangle(g_objectPrefix + "TRACK_COL_BG", x + 1,
+                      columnHeaderY, panelWidth - 2, 24,
+                      g_styleTableHeader, g_styleTableHeader, 4);
+   SetTrackerRow(g_objectPrefix + "TRACK_HEAD", textX,
+                 columnHeaderY + 6,
+                 "DATE       LOT    PROFIT   GAIN%   TRADES   W/L",
+                 g_styleTableText, trackerFont, true);
+
+   for(int staleRow = 0; staleRow < 60; staleRow++)
+      DeleteObjectIfExists(g_objectPrefix + "TRACK_ROW_"
+                           + IntegerToString(staleRow));
+
+   double cumulativeRecentProfit = 0.0;
+   int rowSlot = 0;
+   for(int d = 0; d < days; d++)
+   {
+      cumulativeRecentProfit += dayProfit[d];
+      if(d > 0 && dayTrades[d] <= 0)
+         continue;
+      if(rowSlot >= displayedRows)
+         break;
+
+      double estimatedStartBalance = AccountBalance() - cumulativeRecentProfit;
+      if(estimatedStartBalance <= 0.0) estimatedStartBalance = AccountBalance();
+      double gainPercent = estimatedStartBalance > 0.0
+                           ? dayProfit[d] / estimatedStartBalance * 100.0 : 0.0;
+      datetime rowDate = todayStart - d * 86400;
+      string winLoss = IntegerToString(dayWins[d]) + "/"
+                       + IntegerToString(dayLosses[d]);
+      string row = PadRight(TimeToString(rowDate, TIME_DATE), 11)
+                   + PadLeft(DoubleToString(dayLots[d], 2), 6)
+                   + PadLeft(SignedNumber(dayProfit[d], 2), 10)
+                   + PadLeft(SignedNumber(gainPercent, 2) + "%", 9)
+                   + PadLeft(IntegerToString(dayTrades[d]), 8)
+                   + PadLeft(winLoss, 8);
+      color rowColor = dayProfit[d] > 0.0 ? SuccessColor
+                       : (dayProfit[d] < 0.0 ? FailureColor
+                                             : g_styleLabel);
+      SetTrackerRow(g_objectPrefix + "TRACK_ROW_" + IntegerToString(rowSlot),
+                    textX, rowStartY + rowSlot * rowHeight,
+                    row, rowColor, trackerFont, false);
+      rowSlot++;
+   }
+
+   string totalWinLoss = IntegerToString(monthlyWins) + "/"
+                         + IntegerToString(monthlyLosses);
+   string totalRow = PadRight("LAST 30D", 11)
+                     + PadLeft(DoubleToString(monthlyLots, 2), 6)
+                     + PadLeft(SignedNumber(monthlyProfit, 2), 10)
+                     + PadLeft(SignedNumber(TrackerGainPercent(monthlyProfit), 2)
+                               + "%", 9)
+                     + PadLeft(IntegerToString(monthlyTrades), 8)
+                     + PadLeft(totalWinLoss, 8);
+   SetScreenRectangle(g_objectPrefix + "TRACK_TOTAL_BG", x + 1, totalY - 3,
+                      panelWidth - 2, 20,
+                      g_styleTotal, g_styleTotal, 4);
+   SetTrackerRow(g_objectPrefix + "TRACK_TOTAL", textX, totalY,
+                 totalRow, clrWhite, trackerFont, true);
+
+   SetScreenRectangle(g_objectPrefix + "TRACK_ANALYSIS_BG", x + 1,
+                      analysisHeaderY, panelWidth - 2, 19,
+                      g_styleAnalysis, g_styleAnalysis, 4);
+   SetCardLabel(g_objectPrefix + "TRACK_ANALYSIS_TITLE", x + 10,
+                analysisHeaderY + 2, "[-] ANALYSIS - WIN RATE",
+                clrWhite, 9, true);
+   SetScreenRectangle(g_objectPrefix + "TRACK_ANALYSIS_COL_BG", x + 1,
+                      analysisColumnsY, panelWidth - 2, 18,
+                      g_styleAnalysisColumns, g_styleAnalysisColumns, 4);
+   SetTrackerRow(g_objectPrefix + "TRACK_ANALYSIS_HEAD", textX,
+                 analysisColumnsY + 4,
+                 "PERIOD       TRADES   WIN%    PROFIT   GAIN%   LOTS",
+                 g_styleTableText, trackerFont, true);
+
+   SetAnalysisLine(0, textX, analysisRowsY,
+                   "TODAY", dayTrades[0], dayWins[0], dayLosses[0],
+                   dayProfit[0], dayLots[0], trackerFont);
+   SetAnalysisLine(1, textX, analysisRowsY + analysisSpacing,
+                   "LAST 7 DAYS", weeklyTrades, weeklyWins, weeklyLosses,
+                   weeklyProfit, weeklyLots, trackerFont);
+   SetAnalysisLine(2, textX, analysisRowsY + analysisSpacing * 2,
+                   "THIS WEEK", thisWeekTrades, thisWeekWins, thisWeekLosses,
+                   thisWeekProfit, thisWeekLots, trackerFont);
+   SetAnalysisLine(3, textX, analysisRowsY + analysisSpacing * 3,
+                   "LAST 30 DAYS", monthlyTrades, monthlyWins, monthlyLosses,
+                   monthlyProfit, monthlyLots, trackerFont);
+   SetAnalysisLine(4, textX, analysisRowsY + analysisSpacing * 4,
+                   "THIS MONTH", thisMonthTrades, thisMonthWins, thisMonthLosses,
+                   thisMonthProfit, thisMonthLots, trackerFont);
+   SetAnalysisLine(5, textX, analysisRowsY + analysisSpacing * 5,
+                   "ALL TIME", totalTrades, totalWins, totalLosses,
+                   totalProfit, totalLots, trackerFont);
+}
+
+double TrackerGainPercent(const double profit)
+{
+   double estimatedStart = AccountBalance() - profit;
+   if(estimatedStart <= 0.0) estimatedStart = AccountBalance();
+   if(estimatedStart <= 0.0) return(0.0);
+   return(profit / estimatedStart * 100.0);
+}
+
+void SetAnalysisLine(const int line,
+                     const int textX,
+                     const int y,
+                     const string period,
+                     const int trades,
+                     const int wins,
+                     const int losses,
+                     const double profit,
+                     const double lots,
+                     const int fontSize)
+{
+   double winRate = OutcomeRate(wins, trades);
+   string tradeText = IntegerToString(trades) + "("
+                      + IntegerToString(wins) + "W/"
+                      + IntegerToString(losses) + "L)";
+   string text = PadRight(period, 13)
+                 + PadLeft(tradeText, 13)
+                 + PadLeft(DoubleToString(winRate, 1) + "%", 8)
+                 + PadLeft(SignedNumber(profit, 2), 10)
+                 + PadLeft(SignedNumber(TrackerGainPercent(profit), 2) + "%", 9)
+                 + PadLeft(DoubleToString(lots, 2), 7);
+   color textColor = profit > 0.0 ? SuccessColor
+                    : (profit < 0.0 ? FailureColor : g_styleText);
+   SetTrackerRow(g_objectPrefix + "ANALYSIS_ROW_" + IntegerToString(line),
+                 textX, y, text, textColor, fontSize, true);
+}
+
+void SetTrackerRow(const string name,
+                   const int x,
+                   const int y,
+                   const string text,
+                   const color textColor,
+                   const int fontSize,
+                   const bool bold)
+{
+   SetCardLabel(name, x, y, text, textColor, fontSize, bold);
+   ObjectSetString(0, name, OBJPROP_FONT,
+                   bold ? g_styleMonoBoldFont : g_styleMonoFont);
+}
+
+string PadLeft(string value, const int width)
+{
+   while(StringLen(value) < width)
+      value = " " + value;
+   return(value);
+}
+
+string PadRight(string value, const int width)
+{
+   while(StringLen(value) < width)
+      value = value + " ";
+   return(value);
+}
+
+string SignedNumber(const double value, const int digits)
+{
+   if(value > 0.0)
+      return("+" + DoubleToString(value, digits));
+   return(DoubleToString(value, digits));
+}
+
+string ShortText(const string value, const int maximumLength)
+{
+   if(StringLen(value) <= maximumLength)
+      return(value);
+   if(maximumLength <= 3)
+      return(StringSubstr(value, 0, maximumLength));
+   return(StringSubstr(value, 0, maximumLength - 3) + "...");
+}
+
+void DrawRaisedCardWithHeader(const string base,
+                              const int x,
+                              const int y,
+                              const int width,
+                              const int height,
+                              const int headerHeight,
+                              const color headerColor,
+                              const string title)
+{
+   color shadow = BlendColor(clrBlack, g_styleBody, 0.82);
+   color body = g_styleBody;
+   color border = g_styleBorder;
+   SetScreenRectangle(base + "_SHADOW", x + 5, y + 6,
+                      width, height, shadow, shadow, 0);
+   SetScreenRectangle(base + "_BODY", x, y,
+                      width, height, body, border, 1);
+   color headerFill = UseFuturisticDashboard ? BlendColor(headerColor, body, 0.20) : headerColor;
+   SetScreenRectangle(base + "_HEADER", x, y,
+                      width, headerHeight, headerFill, border, 2);
+   SetScreenRectangle(base + "_HILITE", x + 1, y + headerHeight,
+                      width - 2, 2,
+                      BlendColor(clrWhite, headerColor, 0.45),
+                      BlendColor(clrWhite, headerColor, 0.45), 3);
+   int titleY = y + (headerHeight - 14) / 2;
+   SetCardLabel(base + "_TITLE", x + 14, titleY,
+                title, UseFuturisticDashboard ? g_styleText : g_styleHeaderText, 10, true);
+}
+
+void DrawRaisedCardRight(const string base,
+                         const int rightMargin,
+                         const int y,
+                         const int width,
+                         const int height,
+                         const color headerColor,
+                         const string title)
+{
+   color shadow = BlendColor(clrBlack, g_styleBody, 0.75);
+   color body = g_styleBody;
+   color border = g_styleBorder;
+   int shadowMargin = rightMargin - 5;
+   if(shadowMargin < 0) shadowMargin = 0;
+
+   SetScreenRectangleRight(base + "_SHADOW", shadowMargin, y + 6,
+                           width, height, shadow, shadow, 0);
+   SetScreenRectangleRight(base + "_BODY", rightMargin, y,
+                           width, height, body, border, 1);
+   SetScreenRectangleRight(base + "_HEADER", rightMargin, y,
+                           width, 34, headerColor, headerColor, 2);
+   SetScreenRectangleRight(base + "_HILITE", rightMargin + 1, y + 34,
+                           width - 2, 2,
+                           BlendColor(clrWhite, headerColor, 0.35),
+                           BlendColor(clrWhite, headerColor, 0.35), 3);
+   SetRightCardLabel(base + "_TITLE", rightMargin + 14, y + 9,
+                     title, g_styleHeaderText, 10, true);
+}
+
+void DrawRaisedCard(const string base,
+                    const int x,
+                    const int y,
+                    const int width,
+                    const int height,
+                    const color headerColor,
+                    const string title)
+{
+   color shadow = BlendColor(clrBlack, g_styleBody, 0.75);
+   color body = g_styleBody;
+   color border = g_styleBorder;
+
+   SetScreenRectangle(base + "_SHADOW", x + 5, y + 6,
+                      width, height, shadow, shadow, 0);
+   SetScreenRectangle(base + "_BODY", x, y,
+                      width, height, body, border, 1);
+   SetScreenRectangle(base + "_HEADER", x, y,
+                      width, 34, headerColor, headerColor, 2);
+   SetScreenRectangle(base + "_HILITE", x + 1, y + 34,
+                      width - 2, 2,
+                      BlendColor(clrWhite, headerColor, 0.35),
+                      BlendColor(clrWhite, headerColor, 0.35), 3);
+   SetCardLabel(base + "_TITLE", x + 14, y + 9,
+                title, UseFuturisticDashboard ? g_styleText : g_styleHeaderText, 10, true);
+}
+
+void SetScreenRectangleRight(const string name,
+                             const int rightMargin,
+                             const int y,
+                             const int width,
+                             const int height,
+                             const color background,
+                             const color border,
+                             const int zorder)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, rightMargin);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, background);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, border);
+   ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, zorder);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+}
+
+void SetScreenRectangle(const string name,
+                        const int x,
+                        const int y,
+                        const int width,
+                        const int height,
+                        const color background,
+                        const color border,
+                        const int zorder)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, background);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, border);
+   ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, zorder);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+}
+
+void SetPanelButton(const string name,
+                    const int x,
+                    const int y,
+                    const int width,
+                    const int height,
+                    const string text,
+                    const color accent)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR,
+                    BlendColor(clrBlack, accent, 0.28));
+   ObjectSetInteger(0, name, OBJPROP_COLOR, UseFuturisticDashboard ? clrWhite : g_styleHeaderText);
+   ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR,
+                    BlendColor(clrWhite, accent, 0.55));
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 10);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 20);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_STATE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, name, OBJPROP_FONT, g_styleBoldFont);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetString(0, name, OBJPROP_TOOLTIP,
+                   "Switch panel style directly");
+}
+
+void SetRightCardLabel(const string name,
+                       const int distanceFromRight,
+                       const int y,
+                       const string text,
+                       const color textColor,
+                       const int fontSize,
+                       const bool bold)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, distanceFromRight);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 5);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, name, OBJPROP_FONT,
+                   bold ? g_styleBoldFont : g_styleFont);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+}
+
+void SetCardLabel(const string name,
+                  const int x,
+                  const int y,
+                  const string text,
+                  const color textColor,
+                  const int fontSize,
+                  const bool bold)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 5);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetString(0, name, OBJPROP_FONT,
+                   bold ? g_styleBoldFont : g_styleFont);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+}
+
+//+------------------------------------------------------------------+
+//| Object cleanup and color utilities                               |
+//+------------------------------------------------------------------+
+void DeleteLiveObjects()
+{
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_BODY");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_UP");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_DN");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_TOP");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_BOTTOM");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_SIGNAL_ARROW");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_SIGNAL_TEXT");
+}
+
+void DeleteObjectIfExists(const string name)
+{
+   if(ObjectFind(0, name) >= 0)
+      ObjectDelete(0, name);
+}
+
+void DeleteEAObjects()
+{
+   if(g_objectPrefix != "")
+      DeleteObjectsWithPrefix(g_objectPrefix);
+}
+
+void DeleteObjectsWithPrefix(const string prefix)
+{
+   int total = ObjectsTotal(0, 0, -1);
+   for(int i = total - 1; i >= 0; i--)
+   {
+      string name = ObjectName(0, i, 0, -1);
+      if(StringFind(name, prefix, 0) == 0)
+         ObjectDelete(0, name);
+   }
+}
+
+color BlendColor(const color foreground,
+                 const color background,
+                 const double opacity)
+{
+   int fg = (int)foreground;
+   int bg = (int)background;
+   int fr = fg & 255;
+   int fgreen = (fg >> 8) & 255;
+   int fb = (fg >> 16) & 255;
+   int br = bg & 255;
+   int bgreen = (bg >> 8) & 255;
+   int bb = (bg >> 16) & 255;
+   int r = (int)MathRound(fr * opacity + br * (1.0 - opacity));
+   int g = (int)MathRound(fgreen * opacity + bgreen * (1.0 - opacity));
+   int b = (int)MathRound(fb * opacity + bb * (1.0 - opacity));
+   return((color)(r | (g << 8) | (b << 16)));
+}
+
+int DaysInMonth(const int year, const int month)
+{
+   if(month == 2)
+   {
+      bool leap = ((year % 400) == 0 ||
+                  ((year % 4) == 0 && (year % 100) != 0));
+      return(leap ? 29 : 28);
+   }
+   if(month == 4 || month == 6 || month == 9 || month == 11)
+      return(30);
+   return(31);
+}
+
+datetime SubtractCalendarMonths(const datetime source, const int months)
+{
+   MqlDateTime parts;
+   TimeToStruct(source, parts);
+   int year = parts.year;
+   int month = parts.mon - months;
+   while(month <= 0)
+   {
+      month += 12;
+      year--;
+   }
+   parts.year = year;
+   parts.mon = month;
+   int maximumDay = DaysInMonth(year, month);
+   if(parts.day > maximumDay) parts.day = maximumDay;
+   return(StructToTime(parts));
+}
+
+string TimeframeText(const int timeframe)
+{
+   switch(timeframe)
+   {
+      case PERIOD_M1:  return("M1");
+      case PERIOD_M5:  return("M5");
+      case PERIOD_M15: return("M15");
+      case PERIOD_M30: return("M30");
+      case PERIOD_H1:  return("H1");
+      case PERIOD_H4:  return("H4");
+      case PERIOD_D1:  return("D1");
+      case PERIOD_W1:  return("W1");
+      case PERIOD_MN1: return("MN1");
+   }
+   return(IntegerToString(timeframe));
+}
+
+string ExitMethodText()
+{
+   switch(ExitMethod)
+   {
+      case EXIT_RANGE_RISK_REWARD: return("Range SL + R:R");
+      case EXIT_ATR_RISK_REWARD:   return("ATR SL + R:R");
+      case EXIT_FIXED_POINTS:      return("Fixed points");
+      case EXIT_OPPOSITE_SIGNAL:   return("Opposite signal");
+   }
+   return("Unknown");
+}
+//+------------------------------------------------------------------+
