@@ -256,6 +256,11 @@ datetime g_rangeLogTo[];
 double   g_rangeLogBottom[];
 int      g_rangeLogCount = 0;
 bool     g_forceVisualRefresh = false;
+//--- signature of the last result-card render; the cards are only
+//--- rebuilt when the view geometry or the trade history actually
+//--- changes, which stops the per-tick delete/recreate flicker.
+string   g_resultCardSignature = "";
+string   g_resultCardTickets = "";
 
 //---- Active selectable panel style
 color    g_styleMainHeader = C'0,140,255';
@@ -503,6 +508,7 @@ void OnChartEvent(const int id,
       g_forceVisualRefresh = true;
       g_lastTrackerHistoryCount = -1;
       g_lastResultCardHistoryCount = -1;
+      g_resultCardSignature = "";
       g_lastDashboardUpdate = 0;
       g_lastDashboardStatus = "";
       UpdateStatusDisplay();
@@ -577,6 +583,7 @@ void OnTick()
       g_currentChartBar = chartBar;
       g_suppressIntrabarUntilNextBar = 0;
       g_lastResultCardHistoryCount = -1;
+      g_resultCardSignature = "";
       DeleteLiveObjects();
 
       // The newly completed bar is the result candle for any breakout
@@ -2440,6 +2447,7 @@ void ChangePanelStyle(const int direction)
 
    g_lastTrackerHistoryCount = -1;
    g_lastResultCardHistoryCount = -1;
+   g_resultCardSignature = "";
    g_lastDashboardUpdate = 0;
    g_lastDashboardStatus = "";
    UpdateStatusDisplay();
@@ -3397,7 +3405,6 @@ bool RangeBottomAt(const datetime when, double &bottomOut)
 void DrawClosedTradeResultCards()
 {
    string cardPrefix = g_objectPrefix + "TRADE_CARD_";
-   DeleteObjectsWithPrefix(cardPrefix);
 
    if(!VisualOutputAvailable())
       return;
@@ -3416,6 +3423,33 @@ void DrawClosedTradeResultCards()
       return;
 
    int barSeconds = PeriodSeconds(_Period);
+
+   // Nothing is deleted or recreated unless something that affects the
+   // drawing has genuinely changed. Without this the cards are rebuilt
+   // on every tick and visibly flicker.
+   double priceMin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
+   double priceMax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
+   long firstVisible = 0;
+   long visibleBars = 0;
+   ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0, firstVisible);
+   ChartGetInteger(0, CHART_VISIBLE_BARS, 0, visibleBars);
+
+   string signature = IntegerToString(OrdersHistoryTotal()) + "|"
+                      + DoubleToString(priceMin, Digits) + "|"
+                      + DoubleToString(priceMax, Digits) + "|"
+                      + IntegerToString((int)firstVisible) + "|"
+                      + IntegerToString((int)visibleBars) + "|"
+                      + IntegerToString(font) + "|"
+                      + IntegerToString(gap) + "|"
+                      + IntegerToString(pad) + "|"
+                      + IntegerToString(g_rangeLogCount);
+   if(signature == g_resultCardSignature)
+      return;
+   g_resultCardSignature = signature;
+
+   // Objects are reused in place by the Set* helpers, so only the
+   // tickets that no longer qualify get removed.
+   string activeTickets = "";
 
    for(int i = OrdersHistoryTotal() - 1; i >= 0; i--)
    {
@@ -3491,6 +3525,26 @@ void DrawClosedTradeResultCards()
       // leader dot at the actual close point
       SetArrowObject(base + "_DOT", OrderCloseTime(), OrderClosePrice(),
                      159, cardColor, 1);
+
+      activeTickets += "," + IntegerToString(OrderTicket()) + ",";
+   }
+
+   // Drop cards whose trade is no longer part of the rendered set.
+   if(g_resultCardTickets != activeTickets)
+   {
+      int total = ObjectsTotal(0, 0, -1);
+      for(int o = total - 1; o >= 0; o--)
+      {
+         string nm = ObjectName(0, o, 0, -1);
+         if(StringFind(nm, cardPrefix, 0) != 0)
+            continue;
+         string tail = StringSubstr(nm, StringLen(cardPrefix));
+         int us = StringFind(tail, "_", 0);
+         if(us > 0) tail = StringSubstr(tail, 0, us);
+         if(StringFind(activeTickets, "," + tail + ",", 0) < 0)
+            ObjectDelete(0, nm);
+      }
+      g_resultCardTickets = activeTickets;
    }
 }
 
