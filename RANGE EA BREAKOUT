@@ -177,10 +177,12 @@ input color                  FailureColor = C'255,72,82';
 input bool                   RangeZoneRaised3D = true;       // bevel edges
 input bool                   RangeZoneShowMidline = true;
 input bool                   RangeZoneShowLeftEdge = true;
-input color                  RangeZoneFillColor = C'0,150,190';    // solid cyan
+input color                  RangeZoneFillColor = C'0,190,235';    // cyan frame
 input color                  RangeZoneTopLineColor = C'40,120,255'; // blue top
 input color                  RangeZoneBottomLineColor = C'235,45,60'; // red low
 input int                    RangeZoneBorderWidth = 2;
+// 0.00 = no fill at all (candles fully visible). Up to ~0.25 stays readable.
+input double                 RangeZoneFillStrength = 0.00;
 
 //---- Committed range state (state after the latest completed candle)
 bool     g_rangeActive = false;
@@ -2547,30 +2549,41 @@ void DrawRangeZone(const string baseName,
    double middle = (top + bottom) * 0.5;
    double height = top - bottom;
 
-   // Solid cyan slab, fully opaque, drawn behind the candles. The raised
-   // look comes purely from the bevel shading on the fill, no shadow and
-   // no blending toward the chart background.
-   color bodyColor  = RangeZoneFillColor;
-   color upperColor = BrightenColor(RangeZoneFillColor, 0.22);
-   color lowerColor = BrightenColor(RangeZoneFillColor, -0.28);
-   color bevelLight = BrightenColor(RangeZoneFillColor, 0.55);
-   color bevelDark  = BrightenColor(RangeZoneFillColor, -0.50);
-   color midColor   = BrightenColor(RangeZoneFillColor, 0.35);
+   // Hollow cyan frame by default: the candles inside the range must stay
+   // fully readable, so no opaque slab is painted over them. The raised
+   // look is produced by the bevel/edge shading, not by a filled body.
+   color frameColor = RangeZoneFillColor;
+   color bevelLight = BrightenColor(frameColor, 0.55);
+   color bevelDark  = BrightenColor(frameColor, -0.45);
+   color midColor   = BrightenColor(frameColor, 0.15);
 
    int borderWidth = RangeZoneBorderWidth;
    if(borderWidth < 1) borderWidth = 1;
    if(borderWidth > 5) borderWidth = 5;
 
-   // Legacy shadow objects from earlier builds are cleared on every pass.
+   // Objects from earlier builds that would cover the candles.
    DeleteObjectIfExists(baseName + "_SHADOW");
 
-   // ---- solid body: lit upper half, shaded lower half = raised slab ----
-   SetPriceRectangle(baseName + "_BODY", leftTime, top, rightTime,
-                     bottom, bodyColor, true);
-   SetPriceRectangle(baseName + "_UP", leftTime, top, rightTime,
-                     middle, upperColor, true);
-   SetPriceRectangle(baseName + "_DN", leftTime, middle, rightTime,
-                     bottom, lowerColor, true);
+   // ---- optional faint tint, off by default ----------------------------
+   double tint = RangeZoneFillStrength;
+   if(tint > 0.60) tint = 0.60;
+   if(tint > 0.0)
+   {
+      color upperTint = BlendColor(BrightenColor(frameColor, 0.15),
+                                   ProBackgroundColor, tint);
+      color lowerTint = BlendColor(BrightenColor(frameColor, -0.30),
+                                   ProBackgroundColor, tint);
+      SetPriceRectangle(baseName + "_UP", leftTime, top, rightTime,
+                        middle, upperTint, true);
+      SetPriceRectangle(baseName + "_DN", leftTime, middle, rightTime,
+                        bottom, lowerTint, true);
+   }
+   else
+   {
+      DeleteObjectIfExists(baseName + "_UP");
+      DeleteObjectIfExists(baseName + "_DN");
+   }
+   DeleteObjectIfExists(baseName + "_BODY");
 
    // ---- boundary lines: blue on top, red on the bottom -----------------
    SetPriceTrend(baseName + "_TOP", leftTime, top, rightTime, top,
@@ -2579,20 +2592,23 @@ void DrawRangeZone(const string baseName,
                  rightTime, bottom, RangeZoneBottomLineColor,
                  STYLE_SOLID, borderWidth);
 
-   // ---- bevel: bright band under the top edge, dark band above the
-   //      bottom edge -> the slab reads as lifted off the chart ---------
+   // ---- raised bevel: bright line just inside the top edge, dark line
+   //      just inside the bottom edge, plus cyan side posts -------------
    if(RangeZoneRaised3D && height > 0.0)
    {
-      double inset = height * 0.06;
+      double inset = height * 0.045;
       SetPriceTrend(baseName + "_BEVEL_HI", leftTime, top - inset,
                     rightTime, top - inset, bevelLight, STYLE_SOLID, 1);
       SetPriceTrend(baseName + "_BEVEL_LO", leftTime, bottom + inset,
                     rightTime, bottom + inset, bevelDark, STYLE_SOLID, 1);
+      SetPriceTrend(baseName + "_RIGHT", rightTime, top, rightTime,
+                    bottom, bevelDark, STYLE_SOLID, 1);
    }
    else
    {
       DeleteObjectIfExists(baseName + "_BEVEL_HI");
       DeleteObjectIfExists(baseName + "_BEVEL_LO");
+      DeleteObjectIfExists(baseName + "_RIGHT");
    }
 
    // ---- equilibrium midline --------------------------------------------
@@ -2605,7 +2621,7 @@ void DrawRangeZone(const string baseName,
    // ---- vertical accent marking where the range was formed -------------
    if(RangeZoneShowLeftEdge)
       SetPriceTrend(baseName + "_EDGE", leftTime, top, leftTime,
-                    bottom, bevelLight, STYLE_SOLID, 1);
+                    bottom, bevelLight, STYLE_SOLID, borderWidth);
    else
       DeleteObjectIfExists(baseName + "_EDGE");
 }
@@ -3973,6 +3989,7 @@ void DeleteLiveObjects()
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_BEVEL_LO");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_MID");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_EDGE");
+   DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_RIGHT");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_BODY");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_UP");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_DN");
