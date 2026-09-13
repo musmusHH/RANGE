@@ -4552,17 +4552,16 @@ void DrawBentoPerformancePanel()
    double tlP = 0.0, tlLo = 0.0;
 
    // Per-period detail: index 0 daily, 1 weekly, 2 monthly, 3 total.
-   // ArrayInitialize is used instead of a loop so the compiler can see
-   // that every element is definitely assigned before first use.
-   double pGrossWin[4], pGrossLoss[4], pBest[4], pWorst[4], pLots[4];
-   int    pTrades[4], pWins[4];
-   ArrayInitialize(pGrossWin, 0.0);
-   ArrayInitialize(pGrossLoss, 0.0);
-   ArrayInitialize(pBest, 0.0);
-   ArrayInitialize(pWorst, 0.0);
-   ArrayInitialize(pLots, 0.0);
-   ArrayInitialize(pTrades, 0);
-   ArrayInitialize(pWins, 0);
+   // Explicit initialiser lists: these arrays are later filled through a
+   // by-reference helper, and the compiler only treats them as definitely
+   // assigned when the values are given at the point of declaration.
+   double pGrossWin[4]  = {0.0, 0.0, 0.0, 0.0};
+   double pGrossLoss[4] = {0.0, 0.0, 0.0, 0.0};
+   double pBest[4]      = {0.0, 0.0, 0.0, 0.0};
+   double pWorst[4]     = {0.0, 0.0, 0.0, 0.0};
+   double pLots[4]      = {0.0, 0.0, 0.0, 0.0};
+   int    pTrades[4]    = {0, 0, 0, 0};
+   int    pWins[4]      = {0, 0, 0, 0};
 
    // Closed trades in time order, for the equity curve.
    datetime eqTime[];
@@ -4715,12 +4714,12 @@ void DrawBentoPerformancePanel()
    BentoPerfTile("G", x, by, W, barsH, accB);
    BentoPerfLabel("G_L", x + 14, by + 9, "PROFIT BY PERIOD", BentoInk, 11, true);
 
-   double vals[4];
-   string names[4];
-   vals[0] = dayProfit[0]; names[0] = "DAILY";
-   vals[1] = wkP;          names[1] = "WEEKLY";
-   vals[2] = moP;          names[2] = "MONTHLY";
-   vals[3] = tlP;          names[3] = "TOTAL";
+   double vals[4] = {0.0, 0.0, 0.0, 0.0};
+   string names[4] = {"DAILY", "WEEKLY", "MONTHLY", "TOTAL"};
+   vals[0] = dayProfit[0];
+   vals[1] = wkP;
+   vals[2] = moP;
+   vals[3] = tlP;
 
    double peak = 0.0;
    for(int v = 0; v < 4; v++)
