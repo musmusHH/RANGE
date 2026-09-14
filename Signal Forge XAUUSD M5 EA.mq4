@@ -85,14 +85,13 @@ input int DashboardFontSize = 9;
 input bool DrawEntrySLTPLines = true;
 input bool DrawClosedTradeResults = true;
 input int  MaximumResultBoxes = 50;
-input int  ResultBoxWidthBars = 8;
+input int  ResultBoxPaddingPixels = 8;
 
 string PREFIX="SF_EA_";
 datetime gLastBar=0;
 bool gBull[11],gBear[11];
 bool gLongSignal=false,gShortSignal=false;
 string gLastAction="EA INITIALIZED";
-int gKnownHistoryTotal=-1;
 
 //+------------------------------------------------------------------+
 int CornerValue(EA_CORNER p)
@@ -409,46 +408,42 @@ void DrawTradeLines()
    SetTradeLine("TP",OrderTakeProfit(),C'0,255,170',STYLE_SOLID,2,"TAKE PROFIT #"+IntegerToString(ticket));
 }
 
-void ResultRectangle(string name,datetime t1,double p1,datetime t2,double p2,color bg,color border)
+void EnsureResultCardObject(string name,int type)
 {
-   if(ObjectFind(0,name)<0) ObjectCreate(0,name,OBJ_RECTANGLE,0,t1,p1,t2,p2);
-   ObjectMove(0,name,0,t1,p1);
-   ObjectMove(0,name,1,t2,p2);
-   ObjectSetInteger(0,name,OBJPROP_COLOR,bg);
-   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_SOLID);
-   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
-   ObjectSetInteger(0,name,OBJPROP_FILL,true);
-   ObjectSetInteger(0,name,OBJPROP_BACK,false);
-   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
-
-   // A second unfilled rectangle supplies a vivid border because MT4 uses
-   // OBJPROP_COLOR for both the fill and edge of a filled price rectangle.
-   string edge=name+"_EDGE";
-   if(ObjectFind(0,edge)<0) ObjectCreate(0,edge,OBJ_RECTANGLE,0,t1,p1,t2,p2);
-   ObjectMove(0,edge,0,t1,p1);
-   ObjectMove(0,edge,1,t2,p2);
-   ObjectSetInteger(0,edge,OBJPROP_COLOR,border);
-   ObjectSetInteger(0,edge,OBJPROP_STYLE,STYLE_SOLID);
-   ObjectSetInteger(0,edge,OBJPROP_WIDTH,1);
-   ObjectSetInteger(0,edge,OBJPROP_FILL,false);
-   ObjectSetInteger(0,edge,OBJPROP_BACK,false);
-   ObjectSetInteger(0,edge,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,edge,OBJPROP_HIDDEN,true);
+   if(ObjectFind(0,name)>=0 && (int)ObjectGetInteger(0,name,OBJPROP_TYPE)!=type)
+      ObjectDelete(0,name);
 }
 
-void ResultText(string name,datetime when,double price,string text,color c,int size)
+void ResultCardRow(string rect,string label,int x,int y,int width,int height,
+                   string text,color bg,color border,int fontSize,int padding)
 {
-   if(ObjectFind(0,name)<0) ObjectCreate(0,name,OBJ_TEXT,0,when,price);
-   ObjectMove(0,name,0,when,price);
-   ObjectSetString(0,name,OBJPROP_TEXT,text);
-   ObjectSetString(0,name,OBJPROP_FONT,"Arial Bold");
-   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,size);
-   ObjectSetInteger(0,name,OBJPROP_COLOR,c);
-   ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_CENTER);
-   ObjectSetInteger(0,name,OBJPROP_BACK,false);
-   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   EnsureResultCardObject(rect,OBJ_RECTANGLE_LABEL);
+   if(ObjectFind(0,rect)<0) ObjectCreate(0,rect,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,rect,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,rect,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,rect,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,rect,OBJPROP_XSIZE,width);
+   ObjectSetInteger(0,rect,OBJPROP_YSIZE,height);
+   ObjectSetInteger(0,rect,OBJPROP_BGCOLOR,bg);
+   ObjectSetInteger(0,rect,OBJPROP_COLOR,border);
+   ObjectSetInteger(0,rect,OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   ObjectSetInteger(0,rect,OBJPROP_BACK,false);
+   ObjectSetInteger(0,rect,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,rect,OBJPROP_HIDDEN,true);
+
+   EnsureResultCardObject(label,OBJ_LABEL);
+   if(ObjectFind(0,label)<0) ObjectCreate(0,label,OBJ_LABEL,0,0,0);
+   ObjectSetInteger(0,label,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,label,OBJPROP_ANCHOR,ANCHOR_LEFT);
+   ObjectSetInteger(0,label,OBJPROP_XDISTANCE,x+padding);
+   ObjectSetInteger(0,label,OBJPROP_YDISTANCE,y+height/2);
+   ObjectSetInteger(0,label,OBJPROP_COLOR,C'255,255,255');
+   ObjectSetInteger(0,label,OBJPROP_FONTSIZE,fontSize);
+   ObjectSetString(0,label,OBJPROP_FONT,"Consolas Bold");
+   ObjectSetString(0,label,OBJPROP_TEXT,text);
+   ObjectSetInteger(0,label,OBJPROP_BACK,false);
+   ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,label,OBJPROP_HIDDEN,true);
 }
 
 string SignedValue(double value,int digits)
@@ -456,50 +451,81 @@ string SignedValue(double value,int digits)
    return (value>=0?"+":"")+DoubleToString(value,digits);
 }
 
-void DrawOneClosedResult()
+bool PixelBoxesOverlap(int x1,int y1,int w1,int h1,int x2,int y2,int w2,int h2)
+{
+   return (x1<x2+w2+3 && x1+w1+3>x2 && y1<y2+h2+3 && y1+h1+3>y2);
+}
+
+void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int &usedCount)
 {
    int ticket=OrderTicket();
    datetime closeTime=OrderCloseTime();
    if(ticket<=0 || closeTime<=0) return;
    string base=PREFIX+"RESULT_"+IntegerToString(ticket)+"_";
 
-   int shift=iBarShift(Symbol(),Period(),closeTime,true);
-   if(shift<0) shift=iBarShift(Symbol(),Period(),closeTime,false);
-   double atr=(shift>=0)?iATR(NULL,0,MathMax(1,ATRLength),shift):0;
-   double boxHeight=MathMax(300*Point,atr*0.85);
-   double center=OrderClosePrice()+boxHeight*0.18;
-   double top=center+boxHeight*0.50;
-   double middle=center;
-   double bottom=center-boxHeight*0.50;
+   // Remove objects created by the previous time/price rectangle version.
+   ObjectDelete(0,base+"MAIN_EDGE");
+   ObjectDelete(0,base+"SUB_EDGE");
 
-   int seconds=MathMax(60,Period()*60);
-   int width=MathMax(3,ResultBoxWidthBars);
-   datetime t1=closeTime;
-   datetime t2=closeTime+width*seconds;
-   // Keep a newly closed trade visible even before future chart space exists.
-   if(Bars>2 && closeTime>=Time[0]-2*seconds)
+   int anchorX=0,anchorY=0;
+   if(!ChartTimePriceToXY(0,0,closeTime,OrderClosePrice(),anchorX,anchorY))
    {
-      t1=closeTime-width*seconds;
-      t2=closeTime;
+      ObjectsDeleteAll(0,base);
+      return;
    }
-   datetime textTime=t1+(t2-t1)/2;
 
    double net=OrderProfit()+OrderSwap()+OrderCommission();
    bool won=(net>0);
-   color mainBg=won?C'0,91,190':C'150,25,52';
-   color subBg=won?C'0,126,225':C'205,36,67';
-   color border=won?C'75,190,255':C'255,105,125';
-   ResultRectangle(base+"MAIN",t1,top,t2,middle,mainBg,border);
-   ResultRectangle(base+"SUB",t1,middle,t2,bottom,subBg,border);
-
    double points=(OrderType()==OP_BUY)?(OrderClosePrice()-OrderOpenPrice())/Point:(OrderOpenPrice()-OrderClosePrice())/Point;
    string side=(OrderType()==OP_BUY)?"BUY ":"SELL ";
    string headline=(won?"WIN  ":"LOSS  ")+SignedValue(net,2);
    string detail=side+DoubleToString(OrderLots(),2)+"  "+SignedValue(MathRound(points),0)+" pts";
-   ResultText(base+"TITLE",textTime,(top+middle)*0.5,headline,C'255,255,255',MathMax(8,DashboardFontSize));
-   ResultText(base+"DETAIL",textTime,(middle+bottom)*0.5,detail,C'255,255,255',MathMax(7,DashboardFontSize-1));
+
+   int mainFont=MathMax(8,DashboardFontSize);
+   int subFont=MathMax(7,DashboardFontSize-1);
+   int padding=MathMax(5,ResultBoxPaddingPixels);
+   // Consolas is monospaced. This sizing keeps both strings inside the card
+   // and avoids the oversized chart-time rectangles used previously.
+   int charPixels=MathMax(6,(mainFont*7)/10);
+   int longest=MathMax(StringLen(headline),StringLen(detail));
+   int width=longest*charPixels+padding*2+4;
+   int mainHeight=mainFont+14;
+   int subHeight=subFont+12;
+   int height=mainHeight+subHeight;
+
+   long chartWidth=0,chartHeight=0;
+   ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartWidth);
+   ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartHeight);
+   int left=anchorX+10;
+   if(left+width>(int)chartWidth-8) left=anchorX-width-10;
+   left=MathMax(8,MathMin(left,(int)chartWidth-width-8));
+   int top=MathMax(8,MathMin(anchorY-height/2,(int)chartHeight-height-8));
+
+   // Collision avoidance: move a card below an existing card, or above it
+   // near the lower edge. Text and both raised rows always move together.
+   for(int pass=0;pass<100;pass++)
+   {
+      bool moved=false;
+      for(int i=0;i<usedCount;i++)
+      {
+         if(!PixelBoxesOverlap(left,top,width,height,usedX[i],usedY[i],usedW[i],usedH[i])) continue;
+         int below=usedY[i]+usedH[i]+5;
+         if(below+height<=(int)chartHeight-8) top=below;
+         else top=MathMax(8,usedY[i]-height-5);
+         moved=true;
+         break;
+      }
+      if(!moved) break;
+   }
+
+   color mainBg=won?C'0,82,185':C'145,20,48';
+   color subBg=won?C'0,124,230':C'210,32,68';
+   color border=won?C'90,205,255':C'255,115,135';
+   ResultCardRow(base+"MAIN",base+"TITLE",left,top,width,mainHeight,headline,mainBg,border,mainFont,padding);
+   ResultCardRow(base+"SUB",base+"DETAIL",left,top+mainHeight,width,subHeight,detail,subBg,border,subFont,padding);
 
    string marker=base+"MARK";
+   EnsureResultCardObject(marker,OBJ_ARROW);
    if(ObjectFind(0,marker)<0) ObjectCreate(0,marker,OBJ_ARROW,0,closeTime,OrderClosePrice());
    ObjectMove(0,marker,0,closeTime,OrderClosePrice());
    ObjectSetInteger(0,marker,OBJPROP_ARROWCODE,159);
@@ -507,6 +533,13 @@ void DrawOneClosedResult()
    ObjectSetInteger(0,marker,OBJPROP_WIDTH,2);
    ObjectSetInteger(0,marker,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,marker,OBJPROP_HIDDEN,true);
+
+   if(usedCount<ArraySize(usedX))
+   {
+      usedX[usedCount]=left; usedY[usedCount]=top;
+      usedW[usedCount]=width; usedH[usedCount]=height;
+      usedCount++;
+   }
 }
 
 void UpdateClosedTradeResults()
@@ -516,16 +549,20 @@ void UpdateClosedTradeResults()
       ObjectsDeleteAll(0,PREFIX+"RESULT_");
       return;
    }
+   int maximum=MathMax(1,MathMin(200,MaximumResultBoxes));
+   int usedX[],usedY[],usedW[],usedH[];
+   ArrayResize(usedX,maximum); ArrayResize(usedY,maximum);
+   ArrayResize(usedW,maximum); ArrayResize(usedH,maximum);
+   ArrayInitialize(usedX,0); ArrayInitialize(usedY,0);
+   ArrayInitialize(usedW,0); ArrayInitialize(usedH,0);
+   int usedCount=0,drawn=0;
    int total=OrdersHistoryTotal();
-   if(total==gKnownHistoryTotal) return;
-   gKnownHistoryTotal=total;
-   int drawn=0;
-   for(int i=total-1;i>=0 && drawn<MathMax(1,MaximumResultBoxes);i--)
+   for(int i=total-1;i>=0 && drawn<maximum;i--)
    {
       if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
       if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber) continue;
       if(OrderType()!=OP_BUY && OrderType()!=OP_SELL) continue;
-      DrawOneClosedResult();
+      DrawOneClosedResult(usedX,usedY,usedW,usedH,usedCount);
       drawn++;
    }
    ChartRedraw(0);
@@ -618,6 +655,11 @@ void OnTimer()
    DrawTradeLines();
    UpdateClosedTradeResults();
    UpdateDashboard();
+}
+
+void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
+{
+   if(id==CHARTEVENT_CHART_CHANGE) UpdateClosedTradeResults();
 }
 
 void OnTick()
