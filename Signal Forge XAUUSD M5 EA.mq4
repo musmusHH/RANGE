@@ -148,6 +148,7 @@ void DrawPanel(string group,EA_CORNER pos,int x,int y,int width,int height)
    ObjectSetInteger(0,n,OBJPROP_COLOR,C'90,105,255');
    ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_RAISED);
    ObjectSetInteger(0,n,OBJPROP_BACK,false);
+   ObjectSetInteger(0,n,OBJPROP_ZORDER,100);
    ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
 }
@@ -173,6 +174,7 @@ void DrawCell(string group,string id,EA_CORNER pos,
    ObjectSetInteger(0,r,OBJPROP_COLOR,C'80,95,125');
    ObjectSetInteger(0,r,OBJPROP_BORDER_TYPE,BORDER_RAISED);
    ObjectSetInteger(0,r,OBJPROP_BACK,false);
+   ObjectSetInteger(0,r,OBJPROP_ZORDER,101);
    ObjectSetInteger(0,r,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,r,OBJPROP_HIDDEN,true);
 
@@ -188,6 +190,7 @@ void DrawCell(string group,string id,EA_CORNER pos,
    ObjectSetInteger(0,l,OBJPROP_FONTSIZE,fontSize);
    ObjectSetString(0,l,OBJPROP_FONT,"Arial Bold");
    ObjectSetString(0,l,OBJPROP_TEXT,text);
+   ObjectSetInteger(0,l,OBJPROP_ZORDER,102);
    ObjectSetInteger(0,l,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,l,OBJPROP_HIDDEN,true);
 }
@@ -505,7 +508,9 @@ void ResultCardRow(string rect,string label,int x,int y,int width,int height,
    ObjectSetInteger(0,rect,OBJPROP_BGCOLOR,bg);
    ObjectSetInteger(0,rect,OBJPROP_COLOR,border);
    ObjectSetInteger(0,rect,OBJPROP_BORDER_TYPE,BORDER_RAISED);
-   ObjectSetInteger(0,rect,OBJPROP_BACK,false);
+   // Result cards stay behind all dashboard/equity panels.
+   ObjectSetInteger(0,rect,OBJPROP_BACK,true);
+   ObjectSetInteger(0,rect,OBJPROP_ZORDER,0);
    ObjectSetInteger(0,rect,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,rect,OBJPROP_HIDDEN,true);
 
@@ -519,7 +524,8 @@ void ResultCardRow(string rect,string label,int x,int y,int width,int height,
    ObjectSetInteger(0,label,OBJPROP_FONTSIZE,fontSize);
    ObjectSetString(0,label,OBJPROP_FONT,"Consolas Bold");
    ObjectSetString(0,label,OBJPROP_TEXT,text);
-   ObjectSetInteger(0,label,OBJPROP_BACK,false);
+   ObjectSetInteger(0,label,OBJPROP_BACK,true);
+   ObjectSetInteger(0,label,OBJPROP_ZORDER,0);
    ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,label,OBJPROP_HIDDEN,true);
 }
@@ -532,60 +538,6 @@ string SignedValue(double value,int digits)
 bool PixelBoxesOverlap(int x1,int y1,int w1,int h1,int x2,int y2,int w2,int h2)
 {
    return (x1<x2+w2+3 && x1+w1+3>x2 && y1<y2+h2+3 && y1+h1+3>y2);
-}
-
-int VisibleSignalFilterCount()
-{
-   if(!gShowEnabledOnly) return 11;
-   int count=0;
-   if(EnableSMA)count++;if(EnableRSI)count++;if(EnableMACD)count++;if(EnableSupertrend)count++;
-   if(EnableStochastic)count++;if(EnableBollinger)count++;if(EnableEMA)count++;if(EnableAO)count++;
-   if(EnableSAR)count++;if(EnableCCI)count++;if(EnableADX)count++;
-   return count;
-}
-
-void KeepResultCardBelowTopPanels(int left,int width,int height,int chartWidth,int chartHeight,int &top)
-{
-   if(!ShowDashboard) return;
-   int gap=10;
-   // Account tracker occupies the upper-left. Any result card in its horizontal
-   // area is moved below the full tracker instead of being drawn over it.
-   if(ShowAccountProfitPanel)
-   {
-      int ax=MathMax(0,AccountPanelX),ay=MathMax(0,AccountPanelY),aw=440,ah=442;
-      if(PixelBoxesOverlap(left,top,width,height,ax,ay,aw,ah)) top=ay+ah+gap;
-   }
-   // Apply the same exclusion to a signal panel positioned along the top.
-   if(SignalPanelPosition==EA_Top_Right || SignalPanelPosition==EA_Top_Left)
-   {
-      int sw=390,sh=94+VisibleSignalFilterCount()*22,sx=10,sy=10;
-      if(SignalPanelPosition==EA_Top_Right) sx=chartWidth-10-sw;
-      if(PixelBoxesOverlap(left,top,width,height,sx,sy,sw,sh)) top=sy+sh+gap;
-   }
-   top=MathMax(8,MathMin(top,chartHeight-height-8));
-}
-
-void KeepResultCardAboveBottomPanels(int left,int width,int height,int chartWidth,int chartHeight,int &top)
-{
-   int gap=10;
-   // The equity curve and Performance panel occupy the lower strip. Since
-   // they sit 10 px from the bottom edge, cards cannot physically go below
-   // them; place cards immediately above them with the same 10 px spacing.
-   if(ShowEquityCurve)
-   {
-      int ex=MathMax(0,EquityCurveX);
-      int eh=MathMax(90,EquityCurveHeight);
-      int ey=chartHeight-MathMax(0,EquityCurveY)-eh;
-      int ew=chartWidth-ex-10-460-gap;
-      if(ew>0 && PixelBoxesOverlap(left,top,width,height,ex,ey,ew,eh)) top=ey-height-gap;
-   }
-   if(ShowDashboard && (PerformancePanelPosition==EA_Bottom_Right || PerformancePanelPosition==EA_Bottom_Left))
-   {
-      int pw=460,ph=126,px=10,py=chartHeight-10-ph;
-      if(PerformancePanelPosition==EA_Bottom_Right) px=chartWidth-10-pw;
-      if(PixelBoxesOverlap(left,top,width,height,px,py,pw,ph)) top=py-height-gap;
-   }
-   top=MathMax(8,MathMin(top,chartHeight-height-8));
 }
 
 void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int &usedCount)
@@ -632,9 +584,6 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    if(left+width>(int)chartWidth-8) left=anchorX-width-10;
    left=MathMax(8,MathMin(left,(int)chartWidth-width-8));
    int top=MathMax(8,MathMin(anchorY-height/2,(int)chartHeight-height-8));
-   KeepResultCardBelowTopPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
-   KeepResultCardAboveBottomPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
-
    // Collision avoidance: move a card below an existing card, or above it
    // near the lower edge. Text and both raised rows always move together.
    for(int pass=0;pass<100;pass++)
@@ -651,12 +600,6 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
       }
       if(!moved) break;
    }
-   KeepResultCardBelowTopPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
-   KeepResultCardAboveBottomPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
-   // A final top exclusion handles very small windows where the bottom move
-   // may have pushed a card back toward an upper panel.
-   KeepResultCardBelowTopPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
-
    color mainBg=won?C'0,82,185':C'145,20,48';
    color subBg=won?C'0,124,230':C'210,32,68';
    color border=won?C'90,205,255':C'255,115,135';
@@ -670,6 +613,7 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    ObjectSetInteger(0,marker,OBJPROP_ARROWCODE,159);
    ObjectSetInteger(0,marker,OBJPROP_COLOR,won?C'255,225,60':C'255,64,96');
    ObjectSetInteger(0,marker,OBJPROP_WIDTH,2);
+   ObjectSetInteger(0,marker,OBJPROP_BACK,true);
    ObjectSetInteger(0,marker,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,marker,OBJPROP_HIDDEN,true);
 
@@ -744,7 +688,8 @@ void UpdateEquityCurve()
    long chartW=0,chartH=0;
    ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartW);
    ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartH);
-   int performanceWidth=460;
+   // Match the Performance panel width to the 390 px Signal panel.
+   int performanceWidth=390;
    int gap=10;
    int width=(int)chartW-MathMax(0,EquityCurveX)-10-performanceWidth-gap;
    int height=MathMax(90,EquityCurveHeight);
@@ -764,8 +709,11 @@ void UpdateEquityCurve()
    }
    ObjectSetInteger(0,canvasName,OBJPROP_XDISTANCE,x);
    ObjectSetInteger(0,canvasName,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,canvasName,OBJPROP_BACK,false);
+   ObjectSetInteger(0,canvasName,OBJPROP_ZORDER,100);
 
-   uint bg=ColorToARGB(C'8,14,26',245);
+   // Fully opaque equity card: no alpha transparency.
+   uint bg=ColorToARGB(C'8,14,26',255);
    uint grid=ColorToARGB(C'42,56,82',210);
    uint bright=ColorToARGB(C'110,150,255',255);
    uint text=ColorToARGB(C'220,232,255',255);
@@ -1053,12 +1001,12 @@ void UpdateDashboard()
    double wr=trades>0?100.0*wins/trades:0;
    int type;int ticket=ActiveTicket(type);
    string position=ticket<0?"FLAT":(type==OP_BUY?"BUY #":"SELL #")+IntegerToString(ticket);
-   int qx=10,qy=10,qw=460,qh=126;
+   int qx=10,qy=10,qw=390,qh=126;
    DrawPanel("PERF",PerformancePanelPosition,qx,qy,qw,qh);
-   DrawCell("PERF","TITLE",PerformancePanelPosition,qx,qy,qw,qh,6,6,448,28,"EA PERFORMANCE | CLOSED ORDERS",C'255,255,255',C'0,105,160',fs+1);
+   DrawCell("PERF","TITLE",PerformancePanelPosition,qx,qy,qw,qh,6,6,378,28,"EA PERFORMANCE | CLOSED ORDERS",C'255,255,255',C'0,105,160',fs+1);
    string heads[5]={"TRADES","WINS","LOSSES","WIN RATE","NET"};
    string vals[5]; vals[0]=IntegerToString(trades);vals[1]=IntegerToString(wins);vals[2]=IntegerToString(losses);vals[3]=DoubleToString(wr,1)+"%";vals[4]=DoubleToString(net,2);
-   int widths[5]={80,70,70,100,128};
+   int widths[5]={66,58,58,88,108};
    color cols[5];cols[0]=C'120,210,255';cols[1]=C'0,255,170';cols[2]=C'255,64,96';cols[3]=(wr>=50)?C'0,255,170':C'255,64,96';cols[4]=(net>0)?C'0,255,170':(net<0?C'255,64,96':C'220,225,235');
    int left=6;
    for(int p=0;p<5;p++)
@@ -1069,8 +1017,8 @@ void UpdateDashboard()
       DrawCell("PERF","V"+id,PerformancePanelPosition,qx,qy,qw,qh,left,59,widths[p],31,vals[p],cols[p],bg,fs+1);
       left+=widths[p];
    }
-   DrawCell("PERF","POS",PerformancePanelPosition,qx,qy,qw,qh,6,92,220,28,"POSITION: "+position,ticket<0?C'255,214,64':C'0,255,170',ticket<0?C'72,58,18':C'0,72,58',fs);
-   DrawCell("PERF","ACT",PerformancePanelPosition,qx,qy,qw,qh,226,92,228,28,gLastAction,C'235,240,255',C'32,42,64',fs);
+   DrawCell("PERF","POS",PerformancePanelPosition,qx,qy,qw,qh,6,92,189,28,"POSITION: "+position,ticket<0?C'255,214,64':C'0,255,170',ticket<0?C'72,58,18':C'0,72,58',fs);
+   DrawCell("PERF","ACT",PerformancePanelPosition,qx,qy,qw,qh,195,92,189,28,gLastAction,C'235,240,255',C'32,42,64',fs);
    ChartRedraw(0);
 }
 
