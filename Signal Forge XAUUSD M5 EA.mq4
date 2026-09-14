@@ -7,6 +7,7 @@
 //| Non-commercial ShareAlike MT4 EA port. Test on demo first.       |
 //+------------------------------------------------------------------+
 #property strict
+#include <Canvas\Canvas.mqh>
 
 //--- Trading
 input int    MagicNumber       = 260914;
@@ -77,11 +78,17 @@ input double ADXThreshold = 22.0;
 
 //--- Display
 enum EA_CORNER { EA_Top_Right=0, EA_Bottom_Right=1, EA_Bottom_Left=2 };
+enum FILTER_PANEL_MODE { Show_All_Filters=0, Show_Activated_Filters_Only=1 };
 input bool ApplyProfessionalChartTheme = true;
 input bool ShowDashboard = true;
 input EA_CORNER SignalPanelPosition = EA_Top_Right;
 input EA_CORNER PerformancePanelPosition = EA_Bottom_Right;
+input FILTER_PANEL_MODE InitialFilterPanelMode = Show_All_Filters;
 input int DashboardFontSize = 9;
+input bool ShowEquityCurve = true;
+input int  EquityCurveX = 10;
+input int  EquityCurveY = 10;
+input int  EquityCurveHeight = 126;
 input bool DrawEntrySLTPLines = true;
 input bool DrawClosedTradeResults = true;
 input int  MaximumResultBoxes = 50;
@@ -92,6 +99,11 @@ datetime gLastBar=0;
 bool gBull[11],gBear[11];
 bool gLongSignal=false,gShortSignal=false;
 string gLastAction="EA INITIALIZED";
+bool gShowEnabledOnly=false;
+CCanvas gEquityCanvas;
+bool gEquityCanvasReady=false;
+int gEquityCanvasWidth=0,gEquityCanvasHeight=0;
+string FILTER_BUTTON_NAME="SF_EA_SIG_FILTER_BUTTON";
 
 //+------------------------------------------------------------------+
 int CornerValue(EA_CORNER p)
@@ -158,6 +170,40 @@ void DrawCell(string group,string id,EA_CORNER pos,
    ObjectSetString(0,l,OBJPROP_TEXT,text);
    ObjectSetInteger(0,l,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,l,OBJPROP_HIDDEN,true);
+}
+
+void DrawFilterToggle(EA_CORNER pos,int panelX,int panelY,int panelW,int panelH,
+                      int left,int top,int width,int height)
+{
+   bool right=(pos==EA_Top_Right || pos==EA_Bottom_Right);
+   bool bottom=(pos==EA_Bottom_Right || pos==EA_Bottom_Left);
+   int x=right?panelX+panelW-left:panelX+left;
+   int y=bottom?panelY+panelH-top:panelY+top;
+   if(ObjectFind(0,FILTER_BUTTON_NAME)<0) ObjectCreate(0,FILTER_BUTTON_NAME,OBJ_BUTTON,0,0,0);
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_CORNER,CornerValue(pos));
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_XSIZE,width);
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_YSIZE,height);
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_BGCOLOR,gShowEnabledOnly?C'0,105,80':C'44,63,105');
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_COLOR,C'255,255,255');
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_BORDER_COLOR,C'100,180,255');
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_FONTSIZE,MathMax(7,DashboardFontSize-1));
+   ObjectSetString(0,FILTER_BUTTON_NAME,OBJPROP_FONT,"Arial Bold");
+   ObjectSetString(0,FILTER_BUTTON_NAME,OBJPROP_TEXT,gShowEnabledOnly?"ACTIVE ONLY":"ALL FILTERS");
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_STATE,false);
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_HIDDEN,true);
+}
+
+void DeleteSignalRow(string id)
+{
+   string parts[3]={"N","S","E"};
+   for(int i=0;i<3;i++)
+   {
+      ObjectDelete(0,PREFIX+"SIG_C_"+parts[i]+id);
+      ObjectDelete(0,PREFIX+"SIG_T_"+parts[i]+id);
+   }
 }
 
 color StatusColor(bool bull,bool bear)
@@ -581,6 +627,103 @@ void HistoryStats(int &trades,int &wins,int &losses,double &net)
    }
 }
 
+void DestroyEquityCurve()
+{
+   if(gEquityCanvasReady) gEquityCanvas.Destroy();
+   gEquityCanvasReady=false;
+   gEquityCanvasWidth=0; gEquityCanvasHeight=0;
+   ObjectDelete(0,PREFIX+"EQUITY_CANVAS");
+}
+
+void UpdateEquityCurve()
+{
+   if(!ShowEquityCurve) { DestroyEquityCurve(); return; }
+   long chartW=0,chartH=0;
+   ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartW);
+   ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartH);
+   int performanceWidth=460;
+   int gap=10;
+   int width=(int)chartW-MathMax(0,EquityCurveX)-10-performanceWidth-gap;
+   int height=MathMax(90,EquityCurveHeight);
+   int x=MathMax(0,EquityCurveX);
+   int y=(int)chartH-MathMax(0,EquityCurveY)-height;
+   if(width<220 || y<0) { DestroyEquityCurve(); return; }
+
+   string canvasName=PREFIX+"EQUITY_CANVAS";
+   if(!gEquityCanvasReady || width!=gEquityCanvasWidth || height!=gEquityCanvasHeight)
+   {
+      DestroyEquityCurve();
+      if(!gEquityCanvas.CreateBitmapLabel(0,0,canvasName,x,y,width,height,COLOR_FORMAT_ARGB_NORMALIZE)) return;
+      gEquityCanvasReady=true; gEquityCanvasWidth=width; gEquityCanvasHeight=height;
+   }
+   ObjectSetInteger(0,canvasName,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,canvasName,OBJPROP_YDISTANCE,y);
+
+   uint bg=ColorToARGB(C'8,14,26',245);
+   uint grid=ColorToARGB(C'42,56,82',210);
+   uint bright=ColorToARGB(C'110,150,255',255);
+   uint text=ColorToARGB(C'220,232,255',255);
+   gEquityCanvas.Erase(bg);
+   // Solid raised card border.
+   gEquityCanvas.Line(0,0,width-1,0,ColorToARGB(C'130,155,220',255));
+   gEquityCanvas.Line(0,0,0,height-1,ColorToARGB(C'130,155,220',255));
+   gEquityCanvas.Line(0,height-1,width-1,height-1,ColorToARGB(C'2,5,12',255));
+   gEquityCanvas.Line(width-1,0,width-1,height-1,ColorToARGB(C'2,5,12',255));
+
+   int count=0; double historyNet=0;
+   for(int i=0;i<OrdersHistoryTotal();i++) if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+   {
+      if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber || (OrderType()!=OP_BUY && OrderType()!=OP_SELL)) continue;
+      count++;
+      historyNet+=OrderProfit()+OrderSwap()+OrderCommission();
+   }
+   double startEquity=(RiskReferenceBalance>0)?RiskReferenceBalance:AccountBalance()-historyNet;
+   double curve[]; ArrayResize(curve,count+1); ArrayInitialize(curve,startEquity);
+   int n=0; double cumulative=startEquity,minV=startEquity,maxV=startEquity;
+   for(int j=0;j<OrdersHistoryTotal();j++) if(OrderSelect(j,SELECT_BY_POS,MODE_HISTORY))
+   {
+      if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber || (OrderType()!=OP_BUY && OrderType()!=OP_SELL)) continue;
+      cumulative+=OrderProfit()+OrderSwap()+OrderCommission();
+      n++; curve[n]=cumulative;
+      minV=MathMin(minV,cumulative); maxV=MathMax(maxV,cumulative);
+   }
+   if(maxV-minV<0.01) { maxV+=1.0; minV-=1.0; }
+
+   int plotL=45,plotR=width-10,plotT=27,plotB=height-20;
+   for(int g=0;g<=3;g++)
+   {
+      int gy=plotT+(plotB-plotT)*g/3;
+      gEquityCanvas.Line(plotL,gy,plotR,gy,grid);
+   }
+   int baseY=plotB-(int)MathRound((startEquity-minV)/(maxV-minV)*(plotB-plotT));
+   baseY=MathMax(plotT,MathMin(plotB,baseY));
+   gEquityCanvas.Line(plotL,baseY,plotR,baseY,bright);
+
+   if(n>0)
+   {
+      int prevX=plotL;
+      int prevY=plotB-(int)MathRound((curve[0]-minV)/(maxV-minV)*(plotB-plotT));
+      for(int k=1;k<=n;k++)
+      {
+         int cx=plotL+(plotR-plotL)*k/MathMax(1,n);
+         int cy=plotB-(int)MathRound((curve[k]-minV)/(maxV-minV)*(plotB-plotT));
+         uint lc=(curve[k]>=curve[k-1])?ColorToARGB(C'0,255,170',255):ColorToARGB(C'255,64,96',255);
+         gEquityCanvas.Line(prevX,prevY,cx,cy,lc);
+         gEquityCanvas.Line(prevX,prevY+1,cx,cy+1,lc);
+         prevX=cx; prevY=cy;
+      }
+   }
+   gEquityCanvas.FontSet("Arial",11,FW_BOLD);
+   gEquityCanvas.TextOut(10,7,"EA EQUITY CURVE",text);
+   double netResult=cumulative-startEquity;
+   string netText="NET "+(netResult>=0?"+":"")+DoubleToString(netResult,2);
+   gEquityCanvas.TextOut(width-105,7,netText,netResult>=0?ColorToARGB(C'0,255,170',255):ColorToARGB(C'255,64,96',255));
+   gEquityCanvas.FontSet("Arial",8,0);
+   gEquityCanvas.TextOut(7,plotT-3,DoubleToString(maxV,0),text);
+   gEquityCanvas.TextOut(7,plotB-8,DoubleToString(minV,0),text);
+   gEquityCanvas.Update();
+}
+
 void UpdateDashboard()
 {
    if(!ShowDashboard) { ObjectsDeleteAll(0,PREFIX+"SIG_"); ObjectsDeleteAll(0,PREFIX+"PERF_"); return; }
@@ -589,15 +732,21 @@ void UpdateDashboard()
    bool enabled[11];
    enabled[0]=EnableSMA;enabled[1]=EnableRSI;enabled[2]=EnableMACD;enabled[3]=EnableSupertrend;enabled[4]=EnableStochastic;
    enabled[5]=EnableBollinger;enabled[6]=EnableEMA;enabled[7]=EnableAO;enabled[8]=EnableSAR;enabled[9]=EnableCCI;enabled[10]=EnableADX;
-   int x=10,y=10,w=390,h=338;
+   int visibleCount=0;
+   for(int vc=0;vc<11;vc++) if(!gShowEnabledOnly || enabled[vc]) visibleCount++;
+   int x=10,y=10,w=390,h=94+visibleCount*22;
    DrawPanel("SIG",SignalPanelPosition,x,y,w,h);
-   DrawCell("SIG","TITLE",SignalPanelPosition,x,y,w,h,6,6,378,28,"SIGNAL FORGE EA | "+Symbol()+" M"+IntegerToString(Period()),C'255,255,255',C'82,55,210',fs+1);
+   DrawCell("SIG","TITLE",SignalPanelPosition,x,y,w,h,6,6,270,28,"SIGNAL FORGE EA | "+Symbol(),C'255,255,255',C'82,55,210',fs+1);
+   DrawFilterToggle(SignalPanelPosition,x,y,w,h,276,6,108,28);
    DrawCell("SIG","H0",SignalPanelPosition,x,y,w,h,6,36,150,22,"INDICATOR",C'120,210,255',C'28,48,88',fs);
    DrawCell("SIG","H1",SignalPanelPosition,x,y,w,h,156,36,130,22,"STATUS",C'120,210,255',C'28,48,88',fs);
    DrawCell("SIG","H2",SignalPanelPosition,x,y,w,h,286,36,98,22,"FILTER",C'120,210,255',C'28,48,88',fs);
+   int slot=0;
    for(int i=0;i<11;i++)
    {
-      int top=60+i*22; string id=IntegerToString(i);
+      string id=IntegerToString(i);
+      if(gShowEnabledOnly && !enabled[i]) { DeleteSignalRow(id); continue; }
+      int top=60+slot*22; slot++;
       color sc=StatusColor(gBull[i],gBear[i]);
       color sb=gBull[i]?C'0,72,58':(gBear[i]?C'92,18,36':C'65,55,20');
       DrawCell("SIG","N"+id,SignalPanelPosition,x,y,w,h,6,top,150,21,names[i],C'235,240,255',C'22,30,48',fs);
@@ -607,7 +756,7 @@ void UpdateDashboard()
    string signal=gLongSignal?"LONG":(gShortSignal?"SHORT":"NEUTRAL");
    color sigc=gLongSignal?C'0,255,170':(gShortSignal?C'255,64,96':C'255,214,64');
    color sigb=gLongSignal?C'0,72,58':(gShortSignal?C'92,18,36':C'72,58,18');
-   DrawCell("SIG","SIGNAL",SignalPanelPosition,x,y,w,h,6,304,378,28,"CURRENT SIGNAL: "+signal,sigc,sigb,fs+1);
+   DrawCell("SIG","SIGNAL",SignalPanelPosition,x,y,w,h,6,60+visibleCount*22,378,28,"CURRENT SIGNAL: "+signal,sigc,sigb,fs+1);
 
    int trades,wins,losses;double net;HistoryStats(trades,wins,losses,net);
    double wr=trades>0?100.0*wins/trades:0;
@@ -638,6 +787,7 @@ void UpdateDashboard()
 int OnInit()
 {
    ArrayInitialize(gBull,false); ArrayInitialize(gBear,false);
+   gShowEnabledOnly=(InitialFilterPanelMode==Show_Activated_Filters_Only);
    ApplyChartTheme();
    EventSetTimer(1);
    gLastBar=0;
@@ -647,6 +797,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   DestroyEquityCurve();
    ObjectsDeleteAll(0,PREFIX);
 }
 
@@ -655,11 +806,22 @@ void OnTimer()
    DrawTradeLines();
    UpdateClosedTradeResults();
    UpdateDashboard();
+   UpdateEquityCurve();
 }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
 {
-   if(id==CHARTEVENT_CHART_CHANGE) UpdateClosedTradeResults();
+   if(id==CHARTEVENT_OBJECT_CLICK && sparam==FILTER_BUTTON_NAME)
+   {
+      gShowEnabledOnly=!gShowEnabledOnly;
+      ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_STATE,false);
+      UpdateDashboard();
+   }
+   if(id==CHARTEVENT_CHART_CHANGE)
+   {
+      UpdateClosedTradeResults();
+      UpdateEquityCurve();
+   }
 }
 
 void OnTick()
