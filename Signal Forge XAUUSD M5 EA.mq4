@@ -96,6 +96,7 @@ input bool DrawEntrySLTPLines = true;
 input bool DrawClosedTradeResults = true;
 input int  MaximumResultBoxes = 50;
 input int  ResultBoxPaddingPixels = 8;
+input int  ResultMovementRefreshMs = 100;
 
 string PREFIX="SF_EA_";
 datetime gLastBar=0;
@@ -554,7 +555,8 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    int anchorX=0,anchorY=0;
    if(!ChartTimePriceToXY(0,0,closeTime,OrderClosePrice(),anchorX,anchorY))
    {
-      ObjectsDeleteAll(0,base);
+      // Keep an already-created card instead of deleting/recreating it. This
+      // preserves its layer beneath the dashboard when it returns on-screen.
       return;
    }
 
@@ -1045,6 +1047,9 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    DrawTradeLines();
+   // Live charts advance continuously; force screen cards to follow their
+   // time/price anchors even when order history has not changed.
+   gKnownResultHistory=-1;
    UpdateClosedTradeResults();
    UpdateDashboard();
    UpdateEquityCurve();
@@ -1064,7 +1069,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
       // In Visual Tester cap refreshes at five per second so Skip remains fast
       // while perceived card movement stays effectively delay-free.
       uint now=GetTickCount();
-      bool refreshNow=(!IsTesting() || now-gLastChartResultRefresh>=200);
+      bool refreshNow=(!IsTesting() || now-gLastChartResultRefresh>=(uint)MathMax(25,ResultMovementRefreshMs));
       if(refreshNow)
       {
          gKnownResultHistory=-1;
@@ -1083,12 +1088,33 @@ void OnTick()
    ManageTrailing();
    if(Bars<100) return;
    bool allowGraphics=(!IsTesting() || IsVisualMode());
-   if(allowGraphics && OrdersHistoryTotal()!=gKnownResultHistory)
+   bool historyChanged=(OrdersHistoryTotal()!=gKnownResultHistory);
+   if(allowGraphics && historyChanged)
    {
+      // Create/update result cards first, then recreate foreground panels so
+      // cards remain behind those panels for the rest of their lifetime.
       UpdateClosedTradeResults();
-      UpdateEquityCurve();
+      ObjectsDeleteAll(0,PREFIX+"SIG_");
+      ObjectsDeleteAll(0,PREFIX+"PERF_");
+      ObjectsDeleteAll(0,PREFIX+"ACCOUNT_");
+      DestroyEquityCurve();gEquityHistoryTotal=-1;
       UpdateDashboard();
+      UpdateEquityCurve();
       DrawTradeLines();
+   }
+   else if(allowGraphics && IsVisualMode())
+   {
+      // Tester auto-scroll does not reliably emit CHARTEVENT_CHART_CHANGE.
+      // Re-anchor cards on ticks at a wall-clock throttle for smooth movement
+      // without performing graphical work on every generated test tick.
+      uint motionNow=GetTickCount();
+      uint refreshDelay=(uint)MathMax(25,ResultMovementRefreshMs);
+      if(motionNow-gLastChartResultRefresh>=refreshDelay)
+      {
+         gKnownResultHistory=-1;
+         UpdateClosedTradeResults();
+         gLastChartResultRefresh=motionNow;
+      }
    }
    if(Time[0]==gLastBar) return;
    gLastBar=Time[0];
