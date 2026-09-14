@@ -36,6 +36,12 @@ input double RiskPerTradePercent = 0.5;
 input double RewardRiskRatio     = 2.0;
 input double RiskReferenceBalance= 0.0; // 0 = current MT4 account balance
 
+// Optional fixed-point TP. When enabled it overrides both the risk R:R TP and
+// the legacy ATR TP. These are broker points: on a 3-digit XAU quote,
+// 1000 points equals a 1.000 price move.
+input bool   EnableTakeProfitByPoints = false;
+input double TakeProfitPoints         = 5000.0;
+
 // Legacy ATR SL/TP remain available but disabled as requested. When money-risk
 // mode is enabled it takes priority over these ATR distance settings.
 input int    ATRLength          = 14;
@@ -326,9 +332,11 @@ int OnCalculate(const int rates_total,const int prev_calculated,
    ArrayInitialize(StopBuffer,EMPTY_VALUE); ArrayInitialize(TargetBuffer,EMPTY_VALUE); ArrayInitialize(TrailBuffer,EMPTY_VALUE);
 
    double riskDistance=MoneyRiskPriceDistance();
+   double pointTPDistance=MathMax(Point,TakeProfitPoints*Point);
    bool riskMode=(EnableRiskBasedSLTP && riskDistance>0.0);
+   bool pointTPMode=(EnableTakeProfitByPoints && TakeProfitPoints>0.0);
    bool slActive=(riskMode || EnableStopLoss);
-   bool tpActive=(riskMode || EnableTakeProfit);
+   bool tpActive=(pointTPMode || riskMode || EnableTakeProfit);
 
    // Combined backtester state
    int tradeState=0,totalTrades=0,winTrades=0;
@@ -477,31 +485,25 @@ int OnCalculate(const int rates_total,const int prev_calculated,
          if(newL)
          {
             indState[j]=1; indEntry[j]=close[i];
-            if(riskMode)
-            {
-               indSL[j]=NormalizeDouble(close[i]-riskDistance,Digits);
-               indTP[j]=NormalizeDouble(close[i]+riskDistance*RewardRiskRatio,Digits);
-            }
-            else
-            {
-               if(EnableStopLoss) indSL[j]=close[i]-atr*StopLossATR;
-               if(EnableTakeProfit) indTP[j]=close[i]+atr*TakeProfitATR;
-            }
+            if(riskMode) indSL[j]=NormalizeDouble(close[i]-riskDistance,Digits);
+            else if(EnableStopLoss) indSL[j]=close[i]-atr*StopLossATR;
+
+            if(pointTPMode) indTP[j]=NormalizeDouble(close[i]+pointTPDistance,Digits);
+            else if(riskMode) indTP[j]=NormalizeDouble(close[i]+riskDistance*MathMax(0.1,RewardRiskRatio),Digits);
+            else if(EnableTakeProfit) indTP[j]=close[i]+atr*TakeProfitATR;
+
             if(EnableTrailingStop) indTS[j]=close[i]-atr*TrailingStopATR;
          }
          if(newS)
          {
             indState[j]=-1; indEntry[j]=close[i];
-            if(riskMode)
-            {
-               indSL[j]=NormalizeDouble(close[i]+riskDistance,Digits);
-               indTP[j]=NormalizeDouble(close[i]-riskDistance*RewardRiskRatio,Digits);
-            }
-            else
-            {
-               if(EnableStopLoss) indSL[j]=close[i]+atr*StopLossATR;
-               if(EnableTakeProfit) indTP[j]=close[i]-atr*TakeProfitATR;
-            }
+            if(riskMode) indSL[j]=NormalizeDouble(close[i]+riskDistance,Digits);
+            else if(EnableStopLoss) indSL[j]=close[i]+atr*StopLossATR;
+
+            if(pointTPMode) indTP[j]=NormalizeDouble(close[i]-pointTPDistance,Digits);
+            else if(riskMode) indTP[j]=NormalizeDouble(close[i]-riskDistance*MathMax(0.1,RewardRiskRatio),Digits);
+            else if(EnableTakeProfit) indTP[j]=close[i]-atr*TakeProfitATR;
+
             if(EnableTrailingStop) indTS[j]=close[i]+atr*TrailingStopATR;
          }
          if(indState[j]==1 && !newL && EnableTrailingStop) indTS[j]=MathMax(indTS[j],close[i]-atr*TrailingStopATR);
@@ -554,31 +556,25 @@ int OnCalculate(const int rates_total,const int prev_calculated,
       if(enterL)
       {
          tradeState=1; entryPrice=close[i];
-         if(riskMode)
-         {
-            slLevel=NormalizeDouble(close[i]-riskDistance,Digits);
-            tpLevel=NormalizeDouble(close[i]+riskDistance*RewardRiskRatio,Digits);
-         }
-         else
-         {
-            if(EnableStopLoss) slLevel=close[i]-atr*StopLossATR;
-            if(EnableTakeProfit) tpLevel=close[i]+atr*TakeProfitATR;
-         }
+         if(riskMode) slLevel=NormalizeDouble(close[i]-riskDistance,Digits);
+         else if(EnableStopLoss) slLevel=close[i]-atr*StopLossATR;
+
+         if(pointTPMode) tpLevel=NormalizeDouble(close[i]+pointTPDistance,Digits);
+         else if(riskMode) tpLevel=NormalizeDouble(close[i]+riskDistance*MathMax(0.1,RewardRiskRatio),Digits);
+         else if(EnableTakeProfit) tpLevel=close[i]+atr*TakeProfitATR;
+
          if(EnableTrailingStop) tsLevel=close[i]-atr*TrailingStopATR;
       }
       if(enterS)
       {
          tradeState=-1; entryPrice=close[i];
-         if(riskMode)
-         {
-            slLevel=NormalizeDouble(close[i]+riskDistance,Digits);
-            tpLevel=NormalizeDouble(close[i]-riskDistance*RewardRiskRatio,Digits);
-         }
-         else
-         {
-            if(EnableStopLoss) slLevel=close[i]+atr*StopLossATR;
-            if(EnableTakeProfit) tpLevel=close[i]-atr*TakeProfitATR;
-         }
+         if(riskMode) slLevel=NormalizeDouble(close[i]+riskDistance,Digits);
+         else if(EnableStopLoss) slLevel=close[i]+atr*StopLossATR;
+
+         if(pointTPMode) tpLevel=NormalizeDouble(close[i]-pointTPDistance,Digits);
+         else if(riskMode) tpLevel=NormalizeDouble(close[i]-riskDistance*MathMax(0.1,RewardRiskRatio),Digits);
+         else if(EnableTakeProfit) tpLevel=close[i]-atr*TakeProfitATR;
+
          if(EnableTrailingStop) tsLevel=close[i]+atr*TrailingStopATR;
       }
       if(tradeState==1 && !enterL && EnableTrailingStop) tsLevel=MathMax(tsLevel,close[i]-atr*TrailingStopATR);
@@ -657,8 +653,10 @@ int OnCalculate(const int rates_total,const int prev_calculated,
       string pf=(pfValue>=999.0)?"MAX":DoubleToString(pfValue,2);
       int qx=10,qy=10,qw=460,qh=100;
       DrawPanel("PERF",PerformanceDashboardPosition,qx,qy,qw,qh);
-      string perfTitle=riskMode ? StringFormat("RISK BACKTEST | %.2f%% | %.2f LOT | RR %.2f",RiskPerTradePercent,RiskLotSize,RewardRiskRatio)
-                                : "PERFORMANCE | ATR / SIGNAL BACKTEST";
+      string tpModeText=pointTPMode ? StringFormat("TP %.0f PTS",TakeProfitPoints)
+                                    : StringFormat("RR %.2f",RewardRiskRatio);
+      string perfTitle=riskMode ? StringFormat("RISK %.2f%% | %.2f LOT | %s",RiskPerTradePercent,RiskLotSize,tpModeText)
+                                : (pointTPMode ? tpModeText+" | SIGNAL BACKTEST" : "PERFORMANCE | ATR / SIGNAL BACKTEST");
       DrawRaisedCell("PERF","TITLE",PerformanceDashboardPosition,qx,qy,qw,qh,6,6,448,28,
                      perfTitle,C'255,255,255',C'0,105,160',fs+1);
       string heads[6]; heads[0]="TRADES";heads[1]="WINS";heads[2]="LOSSES";heads[3]="WIN RATE";heads[4]="PF";heads[5]="PNL %";
