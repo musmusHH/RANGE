@@ -646,7 +646,8 @@ void OnTick()
    }
 
    UpdateStatusDisplay();
-   ChartRedraw(0);
+   if(VisualOutputAvailable())
+      ChartRedraw(0);
 }
 
 //+------------------------------------------------------------------+
@@ -890,6 +891,8 @@ void EvaluateCurrentIntrabar()
 
 bool IsZoneCondition(const int shift)
 {
+   // Ordered cheapest-first: the current-bar test rejects the vast
+   // majority of ticks, so the other two medians are rarely computed.
    double currentVolatility = CalculateVolatility(shift);
    if(currentVolatility >= SignalVolatilityThreshold)
       return(false);
@@ -908,8 +911,11 @@ bool IsZoneCondition(const int shift)
 //+------------------------------------------------------------------+
 double CalculateVolatility(const int shift)
 {
-   double samples[];
-   ArrayResize(samples, SignalRangeLength);
+   // A static buffer avoids a heap resize on every single call; this
+   // function runs several times per tick.
+   static double samples[];
+   if(ArraySize(samples) != SignalRangeLength)
+      ArrayResize(samples, SignalRangeLength);
 
    double sum = 0.0;
    for(int j = 0; j < SignalRangeLength; j++)
@@ -1933,7 +1939,13 @@ void UpdateDailyLossProtection()
       g_dailyClosedProfit = ClosedEAProfitSince(g_dailyStartTime);
       g_dailyHistoryCount = historyCount;
    }
-   g_dailyFloatingProfit = FloatingEAProfit();
+
+   // Scanning open trades only matters when something is actually open;
+   // with a flat book this skips an OrdersTotal() loop on every tick.
+   if(OrdersTotal() > 0)
+      g_dailyFloatingProfit = FloatingEAProfit();
+   else
+      g_dailyFloatingProfit = 0.0;
    g_dailyNetResult = g_dailyClosedProfit + g_dailyFloatingProfit;
 
    if(!EnableDailyLossLimit || g_dailyStartBalance <= 0.0)
@@ -2023,7 +2035,7 @@ bool CloseAllMagicPositions()
 //+------------------------------------------------------------------+
 void ManageTrailingStops()
 {
-   if(!EnableTrailingStop)
+   if(!EnableTrailingStop || OrdersTotal() == 0)
       return;
 
    RefreshRates();
@@ -2916,6 +2928,9 @@ void SetPriceText(const string name,
 //+------------------------------------------------------------------+
 void UpdateStatusDisplay()
 {
+   // In a non-visual backtest every panel, tile, label and curve segment
+   // is invisible, so none of it is built. This is the single biggest
+   // optimiser/backtest speed factor in the whole EA.
    if(!VisualOutputAvailable())
       return;
    if(!ShowEAStatus && !ShowProfitTracker && !ShowClosedTradeResultCards)
@@ -5178,6 +5193,11 @@ void BentoPerfVBar(const string key, const int x, const int baseY,
 //+------------------------------------------------------------------+
 void DeleteLiveObjects()
 {
+   // No chart objects are ever created in a non-visual backtest, so the
+   // whole delete sweep is skipped.
+   if(!VisualOutputAvailable())
+      return;
+
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_SHADOW");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_BEVEL_HI");
    DeleteObjectIfExists(g_objectPrefix + "LIVE_RANGE_BEVEL_LO");
