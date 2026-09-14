@@ -159,6 +159,7 @@ input int                    ResultCardFontSize = 9;
 input double                 ResultCardCharWidthPx = 0.62; // width per pt of font
 input int                    ResultCardPadPixels = 10;
 input bool                   ResultCardsAvoidPanels = true; // hide under panels
+input int                    ResultCardPanelMargin = 8;
 input int                    DashboardX = 12;
 input int                    DashboardY = 20;
 input bool                   ShowProfitTracker = true;
@@ -198,6 +199,7 @@ input color                  SecPerfColor     = C'0,170,255';   // performance
 input color                  SecTableColor    = C'150,90,255';  // daily table
 input color                  SecPeriodColor   = C'255,175,0';   // by period
 input color                  SecCurveColor    = C'0,215,170';   // equity curve
+input int                    EquityCurveThickness = 2;
 
 //---- Range zone rendering (solid cyan slab, raised, behind the candles)
 input bool                   RangeZoneRaised3D = true;       // bevel edges
@@ -3546,13 +3548,17 @@ void DrawClosedTradeResultCards()
                              + (long)MathCeil((double)cardPx
                                / MathMax(pxPerBar, 1)) * barSeconds);
 
-      // Work in pixels for collision testing: y grows downward, so the
-      // card top is 'gap' pixels BELOW the anchor.
-      int anchorPx = (int)MathRound((priceMax - anchorPrice) * pxPerPrice);
-      int leftPx = (int)MathRound((double)(leftTime - firstVisibleTime)
-                                  / barSeconds * pxPerBar);
+      // Exact screen position of the anchor. Estimating this from
+      // CHART_SCALE was inaccurate, which let cards land on the panels.
+      int anchorPxX = 0;
+      int anchorPxY = 0;
+      if(!ChartTimePriceToXY(0, 0, leftTime, anchorPrice,
+                             anchorPxX, anchorPxY))
+         continue;
+
+      int leftPx = anchorPxX;
       int rightPx = leftPx + cardPx;
-      int topPx = anchorPx + gap;
+      int topPx = anchorPxY + gap;
 
       // Slide the card downward while it collides with an already
       // placed card, always preserving a 'gap' pixel separation.
@@ -3575,12 +3581,17 @@ void DrawClosedTradeResultCards()
       }
 
       // Chart-layer objects always paint over screen panels, so a card
-      // that would sit beneath a dashboard is not drawn at all.
+      // that would sit beneath a dashboard is not drawn at all. The
+      // margin widens the panel rectangle slightly so a card can never
+      // clip an edge or a drop shadow.
+      int pm = ResultCardPanelMargin;
       if(ResultCardsAvoidPanels &&
-         (RectanglesIntersect(leftPx, topPx, rightPx, topPx + cardPxH,
+         (RectanglesIntersect(leftPx - pm, topPx - pm,
+                              rightPx + pm, topPx + cardPxH + pm,
                               g_panelLeftX1, g_panelLeftY1,
                               g_panelLeftX2, g_panelLeftY2) ||
-          RectanglesIntersect(leftPx, topPx, rightPx, topPx + cardPxH,
+          RectanglesIntersect(leftPx - pm, topPx - pm,
+                              rightPx + pm, topPx + cardPxH + pm,
                               g_panelRightX1, g_panelRightY1,
                               g_panelRightX2, g_panelRightY2)))
       {
@@ -4952,11 +4963,8 @@ void BentoDrawEquityCurve(const int x, const int y, const int W,
    int plotW = plotR - plotL;
    int plotH = plotB - plotT;
 
-   for(int stale = 0; stale < 200; stale++)
-   {
-      DeleteObjectIfExists(g_objectPrefix + "BP_EQS" + IntegerToString(stale));
+   for(int stale = 0; stale < 480; stale++)
       DeleteObjectIfExists(g_objectPrefix + "BP_EQF" + IntegerToString(stale));
-   }
    for(int gl = 0; gl < 12; gl++)
    {
       DeleteObjectIfExists(g_objectPrefix + "BP_EQGH" + IntegerToString(gl));
@@ -5037,45 +5045,83 @@ void BentoDrawEquityCurve(const int x, const int y, const int W,
    BentoPerfLabel("Q_LO", x + 10, plotB - 7,
                   DoubleToString(lo, 0), BentoInk, 7, false);
 
-   // ---- the curve itself: a genuine polyline -----------------------
-   // Screen-pixel trend lines are not available, so each segment is an
-   // OBJ_RECTANGLE_LABEL one or two pixels thick stepped between the
-   // two sample points. With one segment per pixel column the result
-   // reads as a continuous smooth line, exactly like the tester graph.
-   int segs = plotW;
-   if(segs > 190) segs = 190;
-   if(segs < 2) segs = 2;
+   // ---- the curve itself: interpolated + smoothed -------------------
+   // Two passes give a moving-average look instead of a step chart:
+   //   1. resample the equity series onto one value per pixel column,
+   //      linearly interpolating between trades so there are no steps;
+   //   2. run a centred moving average over those columns to round off
+   //      the corners, exactly like an MA line on the chart.
+   int cols = plotW;
+   if(cols > 240) cols = 240;
+   if(cols < 2) cols = 2;
 
-   int prevX = plotL;
-   int prevY = plotB - (int)((curve[0] - lo) / span * plotH);
-   int seg = 0;
-
-   for(int c = 1; c <= segs; c++)
+   double raw[];
+   ArrayResize(raw, cols);
+   ArrayInitialize(raw, 0.0);
+   for(int c = 0; c < cols; c++)
    {
-      double frac = (double)c / segs;
-      int idx = (int)MathRound(frac * (pts - 1));
-      if(idx < 0) idx = 0;
-      if(idx > pts - 1) idx = pts - 1;
+      double pos = (double)c / (cols - 1) * (pts - 1);
+      int i0 = (int)MathFloor(pos);
+      int i1 = i0 + 1;
+      if(i0 < 0) i0 = 0;
+      if(i0 > pts - 1) i0 = pts - 1;
+      if(i1 > pts - 1) i1 = pts - 1;
+      double f = pos - i0;
+      raw[c] = curve[i0] * (1.0 - f) + curve[i1] * f;
+   }
 
-      int cxp = plotL + (int)(plotW * frac);
-      int cyp = plotB - (int)((curve[idx] - lo) / span * plotH);
+   // centred moving average; window scales with the sample density
+   int win = (int)MathRound((double)cols / MathMax(pts - 1, 1) * 1.5);
+   if(win < 2) win = 2;
+   if(win > 14) win = 14;
 
-      // vertical connector so the line never breaks between columns
-      int vTop = cyp < prevY ? cyp : prevY;
-      int vH = MathAbs(cyp - prevY);
-      if(vH > 0 && seg < 200)
+   double smooth[];
+   ArrayResize(smooth, cols);
+   ArrayInitialize(smooth, 0.0);
+   for(int m = 0; m < cols; m++)
+   {
+      double acc = 0.0;
+      int n = 0;
+      for(int w = -win; w <= win; w++)
       {
-         SetScreenRectangle(g_objectPrefix + "BP_EQS" + IntegerToString(seg),
-                            prevX, vTop, 2, vH,
-                            SecCurveColor, SecCurveColor, 8);
-         seg++;
+         int q = m + w;
+         if(q < 0 || q > cols - 1) continue;
+         acc += raw[q];
+         n++;
       }
-      // horizontal run to this column
-      int hW = cxp - prevX;
-      if(hW > 0 && seg < 200)
+      smooth[m] = n > 0 ? acc / n : raw[m];
+   }
+   // keep the endpoints honest so the final equity is not averaged away
+   smooth[0] = raw[0];
+   smooth[cols - 1] = raw[cols - 1];
+
+   int thick = EquityCurveThickness;
+   if(thick < 1) thick = 1;
+   if(thick > 5) thick = 5;
+
+   int seg = 0;
+   int prevX = plotL;
+   int prevY = plotB - (int)((smooth[0] - lo) / span * plotH);
+
+   for(int c2 = 1; c2 < cols && seg < 470; c2++)
+   {
+      int cxp = plotL + (int)((double)plotW * c2 / (cols - 1));
+      int cyp = plotB - (int)((smooth[c2] - lo) / span * plotH);
+
+      int dx = cxp - prevX;
+      int dy = cyp - prevY;
+
+      // Draw the segment as a short run of stacked pixels following the
+      // slope, so diagonals look continuous rather than stepped.
+      int steps = MathMax(MathAbs(dx), MathAbs(dy));
+      if(steps < 1) steps = 1;
+      if(steps > 24) steps = 24;
+      for(int t2 = 1; t2 <= steps && seg < 470; t2++)
       {
+         int sx = prevX + (int)MathRound((double)dx * t2 / steps);
+         int sy = prevY + (int)MathRound((double)dy * t2 / steps);
          SetScreenRectangle(g_objectPrefix + "BP_EQS" + IntegerToString(seg),
-                            prevX, cyp, hW + 1, 2,
+                            sx, sy - thick / 2, thick + 1, thick + 1,
                             SecCurveColor, SecCurveColor, 8);
          seg++;
       }
@@ -5083,6 +5129,9 @@ void BentoDrawEquityCurve(const int x, const int y, const int W,
       prevX = cxp;
       prevY = cyp;
    }
+
+   for(int clr = seg; clr < 480; clr++)
+      DeleteObjectIfExists(g_objectPrefix + "BP_EQS" + IntegerToString(clr));
 
    // ---- end marker and stats ---------------------------------------
    SetScreenRectangle(g_objectPrefix + "BP_EQDOT", prevX - 3, prevY - 3,
