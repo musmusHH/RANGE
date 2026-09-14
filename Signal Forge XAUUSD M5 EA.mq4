@@ -77,10 +77,13 @@ input int  ADXPeriod = 14;
 input double ADXThreshold = 22.0;
 
 //--- Display
-enum EA_CORNER { EA_Top_Right=0, EA_Bottom_Right=1, EA_Bottom_Left=2 };
+enum EA_CORNER { EA_Top_Right=0, EA_Bottom_Right=1, EA_Bottom_Left=2, EA_Top_Left=3 };
 enum FILTER_PANEL_MODE { Show_All_Filters=0, Show_Activated_Filters_Only=1 };
 input bool ApplyProfessionalChartTheme = true;
 input bool ShowDashboard = true;
+input bool ShowAccountProfitPanel = true;
+input int  AccountPanelX = 10;
+input int  AccountPanelY = 10;
 input EA_CORNER SignalPanelPosition = EA_Top_Right;
 input EA_CORNER PerformancePanelPosition = EA_Bottom_Right;
 input FILTER_PANEL_MODE InitialFilterPanelMode = Show_All_Filters;
@@ -112,6 +115,12 @@ bool gSTReady=false;
 double gSTUpper=0,gSTLower=0,gSTLine=0,gSTClose=0;
 int gSTDirection=0,gSTPreviousDirection=0;
 datetime gSTTime=0,gSTPreviousTime=0;
+// Cached account/trade tracker statistics; rebuilt only when history/day changes.
+int gTrackerHistory=-1,gTrackerTrades=0,gTrackerWins=0;
+datetime gTrackerDay=0;
+double gTrackerGrossProfit=0,gTrackerGrossLoss=0,gTrackerMaxDD=0;
+double gTrackerDaily=0,gTrackerWeekly=0,gTrackerMonthly=0,gTrackerTotal=0;
+double gTrackerDayProfit[5],gTrackerDayLots[5];
 string FILTER_BUTTON_NAME="SF_EA_SIG_FILTER_BUTTON";
 
 //+------------------------------------------------------------------+
@@ -119,7 +128,8 @@ int CornerValue(EA_CORNER p)
 {
    if(p==EA_Top_Right) return CORNER_RIGHT_UPPER;
    if(p==EA_Bottom_Right) return CORNER_RIGHT_LOWER;
-   return CORNER_LEFT_LOWER;
+   if(p==EA_Bottom_Left) return CORNER_LEFT_LOWER;
+   return CORNER_LEFT_UPPER;
 }
 
 void DrawPanel(string group,EA_CORNER pos,int x,int y,int width,int height)
@@ -773,9 +783,144 @@ void UpdateEquityCurve()
    gEquityChartHeight=(int)chartH;
 }
 
+datetime StartOfDay(datetime when)
+{
+   MqlDateTime d; TimeToStruct(when,d);
+   d.hour=0;d.min=0;d.sec=0;
+   return StructToTime(d);
+}
+
+datetime StartOfMonth(datetime when)
+{
+   MqlDateTime d; TimeToStruct(when,d);
+   d.day=1;d.hour=0;d.min=0;d.sec=0;
+   return StructToTime(d);
+}
+
+void UpdateTrackerCache()
+{
+   datetime now=TimeCurrent();
+   datetime day=StartOfDay(now);
+   int history=OrdersHistoryTotal();
+   if(history==gTrackerHistory && day==gTrackerDay) return;
+   gTrackerHistory=history;gTrackerDay=day;gTrackerTrades=0;gTrackerWins=0;
+   gTrackerGrossProfit=0;gTrackerGrossLoss=0;gTrackerMaxDD=0;
+   gTrackerDaily=0;gTrackerWeekly=0;gTrackerMonthly=0;gTrackerTotal=0;
+   ArrayInitialize(gTrackerDayProfit,0.0);ArrayInitialize(gTrackerDayLots,0.0);
+   int weekday=TimeDayOfWeek(day); // Sunday=0
+   int daysFromMonday=(weekday==0)?6:weekday-1;
+   datetime weekStart=day-daysFromMonday*86400;
+   datetime monthStart=StartOfMonth(now);
+
+   // First pass collects period totals and the total used to reconstruct the
+   // EA's starting balance for its closed-equity drawdown calculation.
+   for(int i=0;i<history;i++) if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+   {
+      if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber || (OrderType()!=OP_BUY && OrderType()!=OP_SELL)) continue;
+      double result=OrderProfit()+OrderSwap()+OrderCommission();
+      datetime closed=OrderCloseTime();
+      gTrackerTrades++;gTrackerTotal+=result;
+      if(result>0){gTrackerWins++;gTrackerGrossProfit+=result;}else gTrackerGrossLoss+=MathAbs(result);
+      if(closed>=day) gTrackerDaily+=result;
+      if(closed>=weekStart) gTrackerWeekly+=result;
+      if(closed>=monthStart) gTrackerMonthly+=result;
+      for(int d=0;d<5;d++)
+      {
+         datetime ds=day-d*86400;
+         if(closed>=ds && closed<ds+86400){gTrackerDayProfit[d]+=result;gTrackerDayLots[d]+=OrderLots();break;}
+      }
+   }
+
+   double running=AccountBalance()-gTrackerTotal;
+   double peak=running;
+   for(int j=0;j<history;j++) if(OrderSelect(j,SELECT_BY_POS,MODE_HISTORY))
+   {
+      if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber || (OrderType()!=OP_BUY && OrderType()!=OP_SELL)) continue;
+      running+=OrderProfit()+OrderSwap()+OrderCommission();
+      peak=MathMax(peak,running);
+      if(peak>0) gTrackerMaxDD=MathMax(gTrackerMaxDD,(peak-running)/peak*100.0);
+   }
+}
+
+color ProfitColor(double value)
+{
+   if(value>0) return C'0,255,170';
+   if(value<0) return C'255,64,96';
+   return C'205,215,235';
+}
+
+void DrawAccountProfitPanel()
+{
+   if(!ShowAccountProfitPanel){ObjectsDeleteAll(0,PREFIX+"ACCOUNT_");return;}
+   UpdateTrackerCache();
+   int fs=MathMax(7,DashboardFontSize);
+   int x=MathMax(0,AccountPanelX),y=MathMax(0,AccountPanelY),w=440,h=376;
+   DrawPanel("ACCOUNT",EA_Top_Left,x,y,w,h);
+   DrawCell("ACCOUNT","TITLE",EA_Top_Left,x,y,w,h,6,6,428,27,"ACCOUNT & PROFIT TRACKER",C'255,255,255',C'25,90,175',fs+1);
+
+   double floating=AccountEquity()-AccountBalance();
+   string accountText[4];
+   accountText[0]="BAL  "+DoubleToString(AccountBalance(),2);
+   accountText[1]="EQUITY  "+DoubleToString(AccountEquity(),2);
+   accountText[2]="FREE  "+DoubleToString(AccountFreeMargin(),2);
+   accountText[3]="FLOAT  "+DoubleToString(floating,2);
+   color accountColor[4];accountColor[0]=C'120,210,255';accountColor[1]=ProfitColor(AccountEquity()-AccountBalance());
+   accountColor[2]=C'120,210,255';accountColor[3]=ProfitColor(floating);
+   for(int a=0;a<4;a++) DrawCell("ACCOUNT","A"+IntegerToString(a),EA_Top_Left,x,y,w,h,6+a*107,35,107,27,accountText[a],accountColor[a],C'24,35,55',fs);
+
+   DrawCell("ACCOUNT","TRADE_HEAD",EA_Top_Left,x,y,w,h,6,64,428,19,"ACTIVE TRADE LEVELS",C'120,210,255',C'28,48,88',fs);
+   int type;int ticket=ActiveTicket(type);double entry=0,sl=0,tp=0,lots=0;
+   if(ticket>=0 && OrderSelect(ticket,SELECT_BY_TICKET)){entry=OrderOpenPrice();sl=OrderStopLoss();tp=OrderTakeProfit();lots=OrderLots();}
+   string tradeText[4];
+   tradeText[0]="ENTRY  "+(entry>0?DoubleToString(entry,Digits):"--");
+   tradeText[1]="SL  "+(sl>0?DoubleToString(sl,Digits):"--");
+   tradeText[2]="TP  "+(tp>0?DoubleToString(tp,Digits):"--");
+   tradeText[3]="LOT  "+(lots>0?DoubleToString(lots,2):"--");
+   color tradeColor[4]={C'90,180,255',C'255,64,96',C'0,255,170',C'255,214,64'};
+   for(int t=0;t<4;t++) DrawCell("ACCOUNT","T"+IntegerToString(t),EA_Top_Left,x,y,w,h,6+t*107,85,107,25,tradeText[t],tradeColor[t],C'24,35,55',fs);
+
+   DrawCell("ACCOUNT","STAT_HEAD",EA_Top_Left,x,y,w,h,6,112,428,19,"TRADING STATISTICS",C'120,210,255',C'28,48,88',fs);
+   double wr=gTrackerTrades>0?100.0*gTrackerWins/gTrackerTrades:0;
+   double pf=gTrackerGrossLoss>0?gTrackerGrossProfit/gTrackerGrossLoss:(gTrackerGrossProfit>0?999.0:0.0);
+   string statText[4];statText[0]="WINRATE "+DoubleToString(wr,1)+"%";statText[1]="DD "+DoubleToString(gTrackerMaxDD,1)+"%";
+   statText[2]="PF "+(pf>=999?"MAX":DoubleToString(pf,2));statText[3]="TRADES "+IntegerToString(gTrackerTrades);
+   color statColor[4];statColor[0]=(wr>=50?C'0,255,170':C'255,64,96');statColor[1]=(gTrackerMaxDD<=10?C'0,255,170':C'255,64,96');
+   statColor[2]=(pf>1?C'0,255,170':C'255,64,96');statColor[3]=C'120,210,255';
+   for(int s=0;s<4;s++) DrawCell("ACCOUNT","S"+IntegerToString(s),EA_Top_Left,x,y,w,h,6+s*107,133,107,25,statText[s],statColor[s],C'24,35,55',fs);
+
+   DrawCell("ACCOUNT","PERF_HEAD",EA_Top_Left,x,y,w,h,6,160,428,19,"DAILY / WEEKLY / MONTHLY / TOTAL",C'120,210,255',C'28,48,88',fs);
+   string periodHead[4]={"DAILY","WEEKLY","MONTHLY","TOTAL"};
+   double periodValue[4];periodValue[0]=gTrackerDaily;periodValue[1]=gTrackerWeekly;periodValue[2]=gTrackerMonthly;periodValue[3]=gTrackerTotal;
+   for(int p=0;p<4;p++)
+   {
+      string id=IntegerToString(p);
+      DrawCell("ACCOUNT","PH"+id,EA_Top_Left,x,y,w,h,6+p*107,181,107,18,periodHead[p],C'170,205,255',C'34,45,68',fs-1);
+      DrawCell("ACCOUNT","PV"+id,EA_Top_Left,x,y,w,h,6+p*107,200,107,24,(periodValue[p]>=0?"+":"")+DoubleToString(periodValue[p],2),ProfitColor(periodValue[p]),periodValue[p]>=0?C'0,65,54':C'82,20,37',fs);
+   }
+
+   DrawCell("ACCOUNT","TRACK_HEAD",EA_Top_Left,x,y,w,h,6,226,428,18,"PROFIT TRACKER — LAST 5 DAYS",C'255,255,255',C'72,48,160',fs);
+   int widths[4]={110,70,120,128};string headers[4]={"DATE","LOTS","PROFIT","GAIN %"};int left=6;
+   for(int hh=0;hh<4;hh++){DrawCell("ACCOUNT","DH"+IntegerToString(hh),EA_Top_Left,x,y,w,h,left,246,widths[hh],19,headers[hh],C'120,210,255',C'28,48,88',fs-1);left+=widths[hh];}
+   double gainBase=(RiskReferenceBalance>0)?RiskReferenceBalance:MathMax(1.0,AccountBalance());
+   for(int d=0;d<5;d++)
+   {
+      int top=266+d*21;string id=IntegerToString(d);datetime date=gTrackerDay-d*86400;
+      double gain=gTrackerDayProfit[d]/gainBase*100.0;color pc=ProfitColor(gTrackerDayProfit[d]);
+      string values[4];values[0]=TimeToString(date,TIME_DATE);values[1]=DoubleToString(gTrackerDayLots[d],2);
+      values[2]=(gTrackerDayProfit[d]>=0?"+":"")+DoubleToString(gTrackerDayProfit[d],2);values[3]=(gain>=0?"+":"")+DoubleToString(gain,2)+"%";
+      left=6;
+      for(int c=0;c<4;c++){DrawCell("ACCOUNT","D"+id+IntegerToString(c),EA_Top_Left,x,y,w,h,left,top,widths[c],20,values[c],c>=2?pc:C'220,230,245',C'20,29,45',fs-1);left+=widths[c];}
+   }
+}
+
 void UpdateDashboard()
 {
-   if(!ShowDashboard) { ObjectsDeleteAll(0,PREFIX+"SIG_"); ObjectsDeleteAll(0,PREFIX+"PERF_"); return; }
+   if(!ShowDashboard)
+   {
+      ObjectsDeleteAll(0,PREFIX+"SIG_");ObjectsDeleteAll(0,PREFIX+"PERF_");ObjectsDeleteAll(0,PREFIX+"ACCOUNT_");
+      return;
+   }
+   DrawAccountProfitPanel();
    int fs=MathMax(7,DashboardFontSize);
    string names[11]={"SMA CROSS","RSI","MACD","SUPERTREND","STOCHASTIC","BOLLINGER","EMA CROSS","AO","SAR","CCI","ADX FILTER"};
    bool enabled[11];
