@@ -109,6 +109,7 @@ int gEquityCanvasWidth=0,gEquityCanvasHeight=0;
 int gEquityChartHeight=0,gEquityHistoryTotal=-1;
 int gKnownResultHistory=-1;
 bool gChartLayoutDirty=false;
+uint gLastChartResultRefresh=0;
 // Incremental Supertrend cache: after one seed pass, only one bar is
 // calculated per new candle instead of replaying 600 bars twice.
 bool gSTReady=false;
@@ -564,6 +565,29 @@ void KeepResultCardBelowTopPanels(int left,int width,int height,int chartWidth,i
    top=MathMax(8,MathMin(top,chartHeight-height-8));
 }
 
+void KeepResultCardAboveBottomPanels(int left,int width,int height,int chartWidth,int chartHeight,int &top)
+{
+   int gap=10;
+   // The equity curve and Performance panel occupy the lower strip. Since
+   // they sit 10 px from the bottom edge, cards cannot physically go below
+   // them; place cards immediately above them with the same 10 px spacing.
+   if(ShowEquityCurve)
+   {
+      int ex=MathMax(0,EquityCurveX);
+      int eh=MathMax(90,EquityCurveHeight);
+      int ey=chartHeight-MathMax(0,EquityCurveY)-eh;
+      int ew=chartWidth-ex-10-460-gap;
+      if(ew>0 && PixelBoxesOverlap(left,top,width,height,ex,ey,ew,eh)) top=ey-height-gap;
+   }
+   if(ShowDashboard && (PerformancePanelPosition==EA_Bottom_Right || PerformancePanelPosition==EA_Bottom_Left))
+   {
+      int pw=460,ph=126,px=10,py=chartHeight-10-ph;
+      if(PerformancePanelPosition==EA_Bottom_Right) px=chartWidth-10-pw;
+      if(PixelBoxesOverlap(left,top,width,height,px,py,pw,ph)) top=py-height-gap;
+   }
+   top=MathMax(8,MathMin(top,chartHeight-height-8));
+}
+
 void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int &usedCount)
 {
    int ticket=OrderTicket();
@@ -609,6 +633,7 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    left=MathMax(8,MathMin(left,(int)chartWidth-width-8));
    int top=MathMax(8,MathMin(anchorY-height/2,(int)chartHeight-height-8));
    KeepResultCardBelowTopPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
+   KeepResultCardAboveBottomPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
 
    // Collision avoidance: move a card below an existing card, or above it
    // near the lower edge. Text and both raised rows always move together.
@@ -626,6 +651,10 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
       }
       if(!moved) break;
    }
+   KeepResultCardBelowTopPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
+   KeepResultCardAboveBottomPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
+   // A final top exclusion handles very small windows where the bottom move
+   // may have pushed a card back toward an upper panel.
    KeepResultCardBelowTopPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
 
    color mainBg=won?C'0,82,185':C'145,20,48';
@@ -1083,16 +1112,21 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
    }
    if(id==CHARTEVENT_CHART_CHANGE)
    {
-      // Visual Tester can emit many chart-change events while skipping.
-      // Defer its redraw to the next bar; update immediately only on live charts.
-      if(IsTesting()) gChartLayoutDirty=true;
-      else
+      // Screen-space result cards must follow chart scrolling immediately.
+      // In Visual Tester cap refreshes at five per second so Skip remains fast
+      // while perceived card movement stays effectively delay-free.
+      uint now=GetTickCount();
+      bool refreshNow=(!IsTesting() || now-gLastChartResultRefresh>=200);
+      if(refreshNow)
       {
          gKnownResultHistory=-1;
          gEquityHistoryTotal=-1;
          UpdateClosedTradeResults();
          UpdateEquityCurve();
+         gLastChartResultRefresh=now;
+         gChartLayoutDirty=false;
       }
+      else gChartLayoutDirty=true;
    }
 }
 
