@@ -22,16 +22,19 @@
 #property indicator_color11 C'41,98,255'
 
 // Signal logic
+// Preset defaults are tuned as a conservative starting point for
+// XAUUSDr on M5 (Exness Raw Spread). They are not a profit guarantee;
+// validate them against your broker history before live use.
 input bool RequireAllEnabledIndicatorsToAlign = true;
 
 // Risk management (ATR)
 input int    ATRLength          = 14;
-input bool   EnableTakeProfit   = false;
-input double TakeProfitATR      = 2.0;
-input bool   EnableStopLoss     = false;
-input double StopLossATR        = 1.5;
-input bool   EnableTrailingStop = false;
-input double TrailingStopATR    = 1.0;
+input bool   EnableTakeProfit   = true;
+input double TakeProfitATR      = 2.4;
+input bool   EnableStopLoss     = true;
+input double StopLossATR        = 1.8;
+input bool   EnableTrailingStop = true;
+input double TrailingStopATR    = 1.2;
 
 // Visuals
 input double OrbDistanceATR     = 1.5;
@@ -40,22 +43,22 @@ input bool   EnableAlerts       = true;
 input bool   AlertOnClosedBar   = true;
 
 // SMA crossover
-input bool EnableSMA = true;
-input int  SMAFastLength = 10;
-input int  SMASlowLength = 20;
+input bool EnableSMA = false;
+input int  SMAFastLength = 9;
+input int  SMASlowLength = 30;
 // RSI filter
-input bool   EnableRSI = false;
+input bool   EnableRSI = true;
 input int    RSILength = 14;
-input double RSILongAbove = 50.0;
-input double RSIShortBelow = 50.0;
+input double RSILongAbove = 52.0;
+input double RSIShortBelow = 48.0;
 // MACD crossover
 input bool EnableMACD = false;
-input int  MACDFastLength = 12;
-input int  MACDSlowLength = 26;
-input int  MACDSignalLength = 9;
+input int  MACDFastLength = 8;
+input int  MACDSlowLength = 21;
+input int  MACDSignalLength = 5;
 // Supertrend
-input bool   EnableSupertrend = false;
-input double SupertrendFactor = 3.0;
+input bool   EnableSupertrend = true;
+input double SupertrendFactor = 2.5;
 input int    SupertrendLength = 10;
 // Stochastic
 input bool EnableStochastic = false;
@@ -67,9 +70,9 @@ input bool   EnableBollinger = false;
 input int    BollingerLength = 20;
 input double BollingerMultiplier = 2.0;
 // EMA crossover
-input bool EnableEMA = false;
-input int  EMAFastLength = 10;
-input int  EMASlowLength = 20;
+input bool EnableEMA = true;
+input int  EMAFastLength = 9;
+input int  EMASlowLength = 21;
 // Awesome Oscillator
 input bool EnableAO = false;
 // Parabolic SAR
@@ -80,13 +83,13 @@ input double SARMaximum = 0.2;
 // CCI filter
 input bool   EnableCCI = false;
 input int    CCILength = 20;
-input double CCILongAbove = 0.0;
-input double CCIShortBelow = 0.0;
+input double CCILongAbove = 50.0;
+input double CCIShortBelow = -50.0;
 // ADX filter
-input bool   EnableADX = false;
+input bool   EnableADX = true;
 input int    ADXSmoothing = 14;
 input int    DILength = 14;
-input double ADXThreshold = 20.0;
+input double ADXThreshold = 22.0;
 
 // Dashboard
 input bool ShowDashboards = true;
@@ -170,11 +173,85 @@ void PutDashboard(string name, SF_CORNER pos, int x, int y, string text)
    }
 }
 
+void DrawRaisedCell(string group,string id,SF_CORNER pos,
+                    int panelX,int panelY,int panelW,int panelH,
+                    int left,int top,int width,int height,
+                    string text,color textColor,color bgColor,int fontSize)
+{
+   bool right=(pos==Top_Right || pos==Bottom_Right);
+   bool bottom=(pos==Bottom_Right || pos==Bottom_Left);
+   int corner=CornerValue(pos);
+
+   // Rectangle coordinates use the edge selected by OBJPROP_CORNER.
+   int rx=right ? panelX+panelW-left-width : panelX+left;
+   int ry=bottom ? panelY+panelH-top-height : panelY+top;
+   string rect=PREFIX+group+"_CELL_"+id;
+   if(ObjectFind(0,rect)<0) ObjectCreate(0,rect,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,rect,OBJPROP_CORNER,corner);
+   ObjectSetInteger(0,rect,OBJPROP_XDISTANCE,rx);
+   ObjectSetInteger(0,rect,OBJPROP_YDISTANCE,ry);
+   ObjectSetInteger(0,rect,OBJPROP_XSIZE,width);
+   ObjectSetInteger(0,rect,OBJPROP_YSIZE,height);
+   ObjectSetInteger(0,rect,OBJPROP_BGCOLOR,bgColor);
+   ObjectSetInteger(0,rect,OBJPROP_COLOR,C'90,105,135');
+   ObjectSetInteger(0,rect,OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   ObjectSetInteger(0,rect,OBJPROP_BACK,false);
+   ObjectSetInteger(0,rect,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,rect,OBJPROP_HIDDEN,true);
+
+   int tx=right ? panelX+panelW-left-width/2 : panelX+left+width/2;
+   int ty=bottom ? panelY+panelH-top-height/2 : panelY+top+height/2;
+   string label=PREFIX+group+"_TEXT_"+id;
+   if(ObjectFind(0,label)<0) ObjectCreate(0,label,OBJ_LABEL,0,0,0);
+   ObjectSetInteger(0,label,OBJPROP_CORNER,corner);
+   ObjectSetInteger(0,label,OBJPROP_ANCHOR,ANCHOR_CENTER);
+   ObjectSetInteger(0,label,OBJPROP_XDISTANCE,tx);
+   ObjectSetInteger(0,label,OBJPROP_YDISTANCE,ty);
+   ObjectSetInteger(0,label,OBJPROP_COLOR,textColor);
+   ObjectSetInteger(0,label,OBJPROP_FONTSIZE,fontSize);
+   ObjectSetString(0,label,OBJPROP_FONT,"Arial Bold");
+   ObjectSetString(0,label,OBJPROP_TEXT,text);
+   ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,label,OBJPROP_HIDDEN,true);
+}
+
+void DrawPanel(string group,SF_CORNER pos,int x,int y,int width,int height)
+{
+   string n=PREFIX+group+"_PANEL";
+   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_CORNER,CornerValue(pos));
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,n,OBJPROP_XSIZE,width);
+   ObjectSetInteger(0,n,OBJPROP_YSIZE,height);
+   ObjectSetInteger(0,n,OBJPROP_BGCOLOR,C'12,16,28');
+   ObjectSetInteger(0,n,OBJPROP_COLOR,C'89,101,255');
+   ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   ObjectSetInteger(0,n,OBJPROP_BACK,false);
+   ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+}
+
+color StatusColor(bool bull,bool bear)
+{
+   if(bull) return C'0,255,170';
+   if(bear) return C'255,64,96';
+   return C'190,200,220';
+}
+
+color RateColor(double value,int count)
+{
+   if(count<=0) return C'190,200,220';
+   if(value>=60.0) return C'0,255,170';
+   if(value>=50.0) return C'255,214,64';
+   return C'255,64,96';
+}
+
 string StatusText(bool bull, bool bear)
 {
-   if(bull) return "Bullish";
-   if(bear) return "Bearish";
-   return "Neutral";
+   if(bull) return "BULLISH";
+   if(bear) return "BEARISH";
+   return "NEUTRAL";
 }
 
 string OnOff(bool v) { return v ? "ON" : "OFF"; }
@@ -460,26 +537,77 @@ int OnCalculate(const int rates_total,const int prev_calculated,
 
    if(ShowDashboards)
    {
-      string names[11]; names[0]="SMA Cross"; names[1]="RSI"; names[2]="MACD"; names[3]="Supertrend"; names[4]="Stochastic";
-      names[5]="Bollinger"; names[6]="EMA Cross"; names[7]="AO"; names[8]="SAR"; names[9]="CCI"; names[10]="ADX Filter";
+      // Remove labels created by the older multiline dashboard implementation.
+      for(int old=0;old<40;old++)
+      {
+         ObjectDelete(0,PREFIX+"IND_"+IntegerToString(old));
+         ObjectDelete(0,PREFIX+"PERF_"+IntegerToString(old));
+      }
+      ObjectDelete(0,PREFIX+"IND"); ObjectDelete(0,PREFIX+"PERF");
+
+      string names[11]; names[0]="SMA CROSS"; names[1]="RSI"; names[2]="MACD"; names[3]="SUPERTREND"; names[4]="STOCHASTIC";
+      names[5]="BOLLINGER"; names[6]="EMA CROSS"; names[7]="AO"; names[8]="SAR"; names[9]="CCI"; names[10]="ADX FILTER";
       bool en[11]; en[0]=EnableSMA;en[1]=EnableRSI;en[2]=EnableMACD;en[3]=EnableSupertrend;en[4]=EnableStochastic;en[5]=EnableBollinger;
       en[6]=EnableEMA;en[7]=EnableAO;en[8]=EnableSAR;en[9]=EnableCCI;en[10]=EnableADX;
-      string dash="INDICATOR DASHBOARD\n-------------------------------\nIndicator       Status     Enabled\n";
+
+      int px=10,py=10,pw=460,ph=338;
+      int fs=MathMax(7,DashboardFontSize);
+      DrawPanel("IND",IndicatorDashboardPosition,px,py,pw,ph);
+      DrawRaisedCell("IND","TITLE",IndicatorDashboardPosition,px,py,pw,ph,6,6,448,28,
+                     "SIGNAL FORGE  |  XAUUSDr M5",C'255,255,255',C'82,55,210',fs+1);
+      DrawRaisedCell("IND","H0",IndicatorDashboardPosition,px,py,pw,ph,6,36,140,22,"INDICATOR",C'120,210,255',C'28,48,88',fs);
+      DrawRaisedCell("IND","H1",IndicatorDashboardPosition,px,py,pw,ph,146,36,100,22,"STATUS",C'120,210,255',C'28,48,88',fs);
+      DrawRaisedCell("IND","H2",IndicatorDashboardPosition,px,py,pw,ph,246,36,120,22,"STANDALONE WR",C'120,210,255',C'28,48,88',fs);
+      DrawRaisedCell("IND","H3",IndicatorDashboardPosition,px,py,pw,ph,366,36,88,22,"FILTER",C'120,210,255',C'28,48,88',fs);
+
       for(int d=0;d<11;d++)
       {
-         string wr=(indTotal[d]>0)?DoubleToString(100.0*indWins[d]/indTotal[d],1)+"%":"0.0%";
-         dash+=StringFormat("%-14s %-8s %s  WR %s\n",names[d],StatusText(curBull[d],curBear[d]),OnOff(en[d]),wr);
+         int top=60+d*22;
+         string row=IntegerToString(d);
+         double wr=(indTotal[d]>0)?100.0*indWins[d]/indTotal[d]:0.0;
+         color statCol=StatusColor(curBull[d],curBear[d]);
+         color statBg=curBull[d]?C'0,72,58':(curBear[d]?C'92,18,36':C'42,49,65');
+         color wrCol=RateColor(wr,indTotal[d]);
+         color wrBg=(indTotal[d]<=0)?C'42,49,65':(wr>=50.0?C'26,70,50':C'80,28,40');
+         color enCol=en[d]?C'0,255,170':C'255,64,96';
+         color enBg=en[d]?C'0,72,58':C'92,18,36';
+         DrawRaisedCell("IND","N"+row,IndicatorDashboardPosition,px,py,pw,ph,6,top,140,21,names[d],C'235,240,255',C'22,30,48',fs);
+         DrawRaisedCell("IND","S"+row,IndicatorDashboardPosition,px,py,pw,ph,146,top,100,21,StatusText(curBull[d],curBear[d]),statCol,statBg,fs);
+         DrawRaisedCell("IND","W"+row,IndicatorDashboardPosition,px,py,pw,ph,246,top,120,21,DoubleToString(wr,1)+"%",wrCol,wrBg,fs);
+         DrawRaisedCell("IND","E"+row,IndicatorDashboardPosition,px,py,pw,ph,366,top,88,21,OnOff(en[d]),enCol,enBg,fs);
       }
-      dash+="-------------------------------\nCURRENT SIGNAL: "+(currentLong?"LONG":(currentShort?"SHORT":"NEUTRAL"));
-      PutDashboard("IND",IndicatorDashboardPosition,10,10,dash);
+      string combined=currentLong?"LONG":(currentShort?"SHORT":"NEUTRAL");
+      color combinedCol=currentLong?C'0,255,170':(currentShort?C'255,64,96':C'255,214,64');
+      color combinedBg=currentLong?C'0,72,58':(currentShort?C'92,18,36':C'74,61,20');
+      DrawRaisedCell("IND","SIGNAL",IndicatorDashboardPosition,px,py,pw,ph,6,304,448,28,
+                     "CURRENT COMBINED SIGNAL:  "+combined,combinedCol,combinedBg,fs+1);
 
       int losses=totalTrades-winTrades;
       double winRate=(totalTrades>0)?100.0*winTrades/totalTrades:0;
-      string pf=(grossLoss>0)?DoubleToString(grossProfit/grossLoss,2):((grossProfit>0)?"MAX":"0.00");
-      string perf="BACKTEST RESULTS [LuxAlgo]\n-----------------------------\n";
-      perf+="Total trades : "+IntegerToString(totalTrades)+"\nWins         : "+IntegerToString(winTrades)+"\nLosses       : "+IntegerToString(losses)+"\n";
-      perf+="Win rate     : "+DoubleToString(winRate,2)+"%\nProfit factor: "+pf+"\nPNL          : "+DoubleToString(netProfitPct,2)+"%";
-      PutDashboard("PERF",PerformanceDashboardPosition,10,10,perf);
+      double pfValue=(grossLoss>0)?grossProfit/grossLoss:((grossProfit>0)?999.0:0.0);
+      string pf=(pfValue>=999.0)?"MAX":DoubleToString(pfValue,2);
+      int qx=10,qy=10,qw=460,qh=100;
+      DrawPanel("PERF",PerformanceDashboardPosition,qx,qy,qw,qh);
+      DrawRaisedCell("PERF","TITLE",PerformanceDashboardPosition,qx,qy,qw,qh,6,6,448,28,
+                     "PERFORMANCE  |  INTERNAL BAR BACKTEST",C'255,255,255',C'0,105,160',fs+1);
+      string heads[6]; heads[0]="TRADES";heads[1]="WINS";heads[2]="LOSSES";heads[3]="WIN RATE";heads[4]="PF";heads[5]="PNL %";
+      int widths[6]; widths[0]=74;widths[1]=62;widths[2]=62;widths[3]=84;widths[4]=78;widths[5]=88;
+      string vals[6]; vals[0]=IntegerToString(totalTrades);vals[1]=IntegerToString(winTrades);vals[2]=IntegerToString(losses);
+      vals[3]=DoubleToString(winRate,1)+"%";vals[4]=pf;vals[5]=DoubleToString(netProfitPct,2)+"%";
+      color valCols[6]; valCols[0]=C'120,210,255';valCols[1]=C'0,255,170';valCols[2]=C'255,64,96';
+      valCols[3]=RateColor(winRate,totalTrades);valCols[4]=(pfValue>1.0)?C'0,255,170':((pfValue==0)?C'190,200,220':C'255,64,96');
+      valCols[5]=(netProfitPct>0)?C'0,255,170':((netProfitPct<0)?C'255,64,96':C'190,200,220');
+      int left=6;
+      for(int pc=0;pc<6;pc++)
+      {
+         string cid=IntegerToString(pc);
+         DrawRaisedCell("PERF","H"+cid,PerformanceDashboardPosition,qx,qy,qw,qh,left,36,widths[pc],22,heads[pc],C'120,210,255',C'28,48,88',fs);
+         color valueBg=(pc==1 || (pc==3 && winRate>=50) || (pc==4 && pfValue>1) || (pc==5 && netProfitPct>0))?C'0,72,58':
+                       ((pc==2 || (pc==3 && totalTrades>0 && winRate<50) || (pc==4 && pfValue>0 && pfValue<=1) || (pc==5 && netProfitPct<0))?C'92,18,36':C'42,49,65');
+         DrawRaisedCell("PERF","V"+cid,PerformanceDashboardPosition,qx,qy,qw,qh,left,59,widths[pc],34,vals[pc],valCols[pc],valueBg,fs+1);
+         left+=widths[pc];
+      }
+      ChartRedraw(0);
    }
    else ObjectsDeleteAll(0,PREFIX);
 
