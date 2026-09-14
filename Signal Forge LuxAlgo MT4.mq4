@@ -178,14 +178,22 @@ int OnCalculate(const int rates_total,const int prev_calculated,
    double netProfitPct=0,grossProfit=0,grossLoss=0;
    bool prevLong=false,prevShort=false;
 
-   // Standalone indicator states/statistics
-   int indState[11],indTotal[11],indWins[11];
-   double indEntry[11],indSL[11],indTP[11],indTS[11];
-   bool indPrevBull[11],indPrevBear[11];
-   for(int z=0;z<11;z++) { indState[z]=0; indTotal[z]=0; indWins[z]=0; indEntry[z]=0; indSL[z]=0; indTP[z]=0; indTS[z]=0; indPrevBull[z]=false; indPrevBear[z]=false; }
+   // Standalone indicator states/statistics. Explicit initializers are used
+   // because MetaEditor's static analyser does not infer initialization from
+   // a loop when a fixed-size local array is subsequently indexed by another
+   // loop variable.
+   int indState[11] = {0,0,0,0,0,0,0,0,0,0,0};
+   int indTotal[11] = {0,0,0,0,0,0,0,0,0,0,0};
+   int indWins[11]  = {0,0,0,0,0,0,0,0,0,0,0};
+   double indEntry[11] = {0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0};
+   double indSL[11]    = {0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0};
+   double indTP[11]    = {0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0};
+   double indTS[11]    = {0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0};
+   bool indPrevBull[11] = {false,false,false,false,false,false,false,false,false,false,false};
+   bool indPrevBear[11] = {false,false,false,false,false,false,false,false,false,false,false};
 
-   bool curBull[11],curBear[11];
-   for(int cb=0;cb<11;cb++){ curBull[cb]=false; curBear[cb]=false; }
+   bool curBull[11] = {false,false,false,false,false,false,false,false,false,false,false};
+   bool curBear[11] = {false,false,false,false,false,false,false,false,false,false,false};
    bool currentLong=false,currentShort=false;
 
    // Custom DMI/ADX Wilder state (Pine supports separate DI and ADX lengths).
