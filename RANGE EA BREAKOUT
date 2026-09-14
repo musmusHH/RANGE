@@ -4518,6 +4518,13 @@ void DrawBentoMainPanel()
    bool rebuildChrome = (mainSig != g_mainPanelSignature);
    g_mainPanelSignature = mainSig;
 
+   // MT4 paints chart-window objects in creation order, so re-creating
+   // only the tile chrome would stack it on top of the existing value
+   // labels and hide them. Clear the panel first and let everything be
+   // recreated in the correct back-to-front order.
+   if(rebuildChrome)
+      DeleteObjectsWithPrefix(g_objectPrefix + "BN_");
+
    // outer container
    if(rebuildChrome)
    {
@@ -4691,6 +4698,9 @@ void DrawBentoPerformancePanel()
    if(perfSig == g_perfPanelSignature)
       return;
    g_perfPanelSignature = perfSig;
+
+   // Rebuild from a clean slate so tiles never paint over their labels.
+   DeleteObjectsWithPrefix(g_objectPrefix + "BP_");
 
    int days = ProfitTrackerDays;
    if(days < 1) days = 1;
