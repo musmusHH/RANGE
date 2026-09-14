@@ -111,11 +111,21 @@ int CornerValue(SF_CORNER p)
    return CORNER_LEFT_LOWER;
 }
 
+int AnchorValue(SF_CORNER p)
+{
+   // The label anchor must match its chart corner. Without this, a label on
+   // the right edge grows outside the chart and the dashboard is invisible.
+   if(p==Top_Right) return ANCHOR_RIGHT_UPPER;
+   if(p==Bottom_Right) return ANCHOR_RIGHT_LOWER;
+   return ANCHOR_LEFT_LOWER;
+}
+
 void PutDashboard(string name, SF_CORNER pos, int x, int y, string text)
 {
    string n=PREFIX+name;
    if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_LABEL,0,0,0);
    ObjectSetInteger(0,n,OBJPROP_CORNER,CornerValue(pos));
+   ObjectSetInteger(0,n,OBJPROP_ANCHOR,AnchorValue(pos));
    ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
    ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
    ObjectSetInteger(0,n,OBJPROP_COLOR,C'219,219,219');
@@ -427,7 +437,7 @@ int OnCalculate(const int rates_total,const int prev_calculated,
          dash+=StringFormat("%-14s %-8s %s  WR %s\n",names[d],StatusText(curBull[d],curBear[d]),OnOff(en[d]),wr);
       }
       dash+="-------------------------------\nCURRENT SIGNAL: "+(currentLong?"LONG":(currentShort?"SHORT":"NEUTRAL"));
-      PutDashboard("IND",IndicatorDashboardPosition,10,20,dash);
+      PutDashboard("IND",IndicatorDashboardPosition,10,10,dash);
 
       int losses=totalTrades-winTrades;
       double winRate=(totalTrades>0)?100.0*winTrades/totalTrades:0;
@@ -435,7 +445,7 @@ int OnCalculate(const int rates_total,const int prev_calculated,
       string perf="BACKTEST RESULTS [LuxAlgo]\n-----------------------------\n";
       perf+="Total trades : "+IntegerToString(totalTrades)+"\nWins         : "+IntegerToString(winTrades)+"\nLosses       : "+IntegerToString(losses)+"\n";
       perf+="Win rate     : "+DoubleToString(winRate,2)+"%\nProfit factor: "+pf+"\nPNL          : "+DoubleToString(netProfitPct,2)+"%";
-      PutDashboard("PERF",PerformanceDashboardPosition,10,20,perf);
+      PutDashboard("PERF",PerformanceDashboardPosition,10,10,perf);
    }
    else ObjectsDeleteAll(0,PREFIX);
 
