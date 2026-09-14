@@ -122,18 +122,52 @@ int AnchorValue(SF_CORNER p)
 
 void PutDashboard(string name, SF_CORNER pos, int x, int y, string text)
 {
-   string n=PREFIX+name;
-   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_LABEL,0,0,0);
-   ObjectSetInteger(0,n,OBJPROP_CORNER,CornerValue(pos));
-   ObjectSetInteger(0,n,OBJPROP_ANCHOR,AnchorValue(pos));
-   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
-   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
-   ObjectSetInteger(0,n,OBJPROP_COLOR,C'219,219,219');
-   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,MathMax(7,DashboardFontSize));
-   ObjectSetString(0,n,OBJPROP_FONT,"Consolas");
-   ObjectSetString(0,n,OBJPROP_TEXT,text);
-   ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+   // MT4's OBJ_LABEL does not render newline characters as separate lines.
+   // Create one label per row so the complete dashboard remains on-screen.
+   string oldName=PREFIX+name;
+   if(ObjectFind(0,oldName)>=0) ObjectDelete(0,oldName); // remove pre-fix label
+
+   string rows[];
+   ushort separator=(ushort)StringGetCharacter("\n",0);
+   int rowCount=StringSplit(text,separator,rows);
+   if(rowCount<1)
+   {
+      ArrayResize(rows,1);
+      rows[0]=text;
+      rowCount=1;
+   }
+
+   int fontSize=MathMax(7,DashboardFontSize);
+   int lineHeight=fontSize+5;
+   int corner=CornerValue(pos);
+   int anchor=AnchorValue(pos);
+
+   for(int i=0;i<rowCount;i++)
+   {
+      string n=PREFIX+name+"_"+IntegerToString(i);
+      if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_LABEL,0,0,0);
+
+      // For lower corners, build upward from the 10-pixel bottom edge while
+      // preserving the normal top-to-bottom order of the supplied text.
+      int rowY=(pos==Top_Right) ? y+i*lineHeight : y+(rowCount-1-i)*lineHeight;
+      ObjectSetInteger(0,n,OBJPROP_CORNER,corner);
+      ObjectSetInteger(0,n,OBJPROP_ANCHOR,anchor);
+      ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
+      ObjectSetInteger(0,n,OBJPROP_YDISTANCE,rowY);
+      ObjectSetInteger(0,n,OBJPROP_COLOR,C'219,219,219');
+      ObjectSetInteger(0,n,OBJPROP_FONTSIZE,fontSize);
+      ObjectSetString(0,n,OBJPROP_FONT,"Consolas");
+      ObjectSetString(0,n,OBJPROP_TEXT,rows[i]);
+      ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+   }
+
+   // Delete surplus rows if a future dashboard update contains fewer lines.
+   for(int stale=rowCount;stale<40;stale++)
+   {
+      string staleName=PREFIX+name+"_"+IntegerToString(stale);
+      if(ObjectFind(0,staleName)>=0) ObjectDelete(0,staleName);
+   }
 }
 
 string StatusText(bool bull, bool bear)
