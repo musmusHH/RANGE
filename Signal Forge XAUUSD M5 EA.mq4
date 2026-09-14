@@ -83,12 +83,16 @@ input EA_CORNER SignalPanelPosition = EA_Top_Right;
 input EA_CORNER PerformancePanelPosition = EA_Bottom_Right;
 input int DashboardFontSize = 9;
 input bool DrawEntrySLTPLines = true;
+input bool DrawClosedTradeResults = true;
+input int  MaximumResultBoxes = 50;
+input int  ResultBoxWidthBars = 8;
 
 string PREFIX="SF_EA_";
 datetime gLastBar=0;
 bool gBull[11],gBear[11];
 bool gLongSignal=false,gShortSignal=false;
 string gLastAction="EA INITIALIZED";
+int gKnownHistoryTotal=-1;
 
 //+------------------------------------------------------------------+
 int CornerValue(EA_CORNER p)
@@ -405,6 +409,128 @@ void DrawTradeLines()
    SetTradeLine("TP",OrderTakeProfit(),C'0,255,170',STYLE_SOLID,2,"TAKE PROFIT #"+IntegerToString(ticket));
 }
 
+void ResultRectangle(string name,datetime t1,double p1,datetime t2,double p2,color bg,color border)
+{
+   if(ObjectFind(0,name)<0) ObjectCreate(0,name,OBJ_RECTANGLE,0,t1,p1,t2,p2);
+   ObjectMove(0,name,0,t1,p1);
+   ObjectMove(0,name,1,t2,p2);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,bg);
+   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_SOLID);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
+   ObjectSetInteger(0,name,OBJPROP_FILL,true);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+
+   // A second unfilled rectangle supplies a vivid border because MT4 uses
+   // OBJPROP_COLOR for both the fill and edge of a filled price rectangle.
+   string edge=name+"_EDGE";
+   if(ObjectFind(0,edge)<0) ObjectCreate(0,edge,OBJ_RECTANGLE,0,t1,p1,t2,p2);
+   ObjectMove(0,edge,0,t1,p1);
+   ObjectMove(0,edge,1,t2,p2);
+   ObjectSetInteger(0,edge,OBJPROP_COLOR,border);
+   ObjectSetInteger(0,edge,OBJPROP_STYLE,STYLE_SOLID);
+   ObjectSetInteger(0,edge,OBJPROP_WIDTH,1);
+   ObjectSetInteger(0,edge,OBJPROP_FILL,false);
+   ObjectSetInteger(0,edge,OBJPROP_BACK,false);
+   ObjectSetInteger(0,edge,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,edge,OBJPROP_HIDDEN,true);
+}
+
+void ResultText(string name,datetime when,double price,string text,color c,int size)
+{
+   if(ObjectFind(0,name)<0) ObjectCreate(0,name,OBJ_TEXT,0,when,price);
+   ObjectMove(0,name,0,when,price);
+   ObjectSetString(0,name,OBJPROP_TEXT,text);
+   ObjectSetString(0,name,OBJPROP_FONT,"Arial Bold");
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,size);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,c);
+   ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_CENTER);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+}
+
+string SignedValue(double value,int digits)
+{
+   return (value>=0?"+":"")+DoubleToString(value,digits);
+}
+
+void DrawOneClosedResult()
+{
+   int ticket=OrderTicket();
+   datetime closeTime=OrderCloseTime();
+   if(ticket<=0 || closeTime<=0) return;
+   string base=PREFIX+"RESULT_"+IntegerToString(ticket)+"_";
+
+   int shift=iBarShift(Symbol(),Period(),closeTime,true);
+   if(shift<0) shift=iBarShift(Symbol(),Period(),closeTime,false);
+   double atr=(shift>=0)?iATR(NULL,0,MathMax(1,ATRLength),shift):0;
+   double boxHeight=MathMax(300*Point,atr*0.85);
+   double center=OrderClosePrice()+boxHeight*0.18;
+   double top=center+boxHeight*0.50;
+   double middle=center;
+   double bottom=center-boxHeight*0.50;
+
+   int seconds=MathMax(60,Period()*60);
+   int width=MathMax(3,ResultBoxWidthBars);
+   datetime t1=closeTime;
+   datetime t2=closeTime+width*seconds;
+   // Keep a newly closed trade visible even before future chart space exists.
+   if(Bars>2 && closeTime>=Time[0]-2*seconds)
+   {
+      t1=closeTime-width*seconds;
+      t2=closeTime;
+   }
+   datetime textTime=t1+(t2-t1)/2;
+
+   double net=OrderProfit()+OrderSwap()+OrderCommission();
+   bool won=(net>0);
+   color mainBg=won?C'0,91,190':C'150,25,52';
+   color subBg=won?C'0,126,225':C'205,36,67';
+   color border=won?C'75,190,255':C'255,105,125';
+   ResultRectangle(base+"MAIN",t1,top,t2,middle,mainBg,border);
+   ResultRectangle(base+"SUB",t1,middle,t2,bottom,subBg,border);
+
+   double points=(OrderType()==OP_BUY)?(OrderClosePrice()-OrderOpenPrice())/Point:(OrderOpenPrice()-OrderClosePrice())/Point;
+   string side=(OrderType()==OP_BUY)?"BUY ":"SELL ";
+   string headline=(won?"WIN  ":"LOSS  ")+SignedValue(net,2);
+   string detail=side+DoubleToString(OrderLots(),2)+"  "+SignedValue(MathRound(points),0)+" pts";
+   ResultText(base+"TITLE",textTime,(top+middle)*0.5,headline,C'255,255,255',MathMax(8,DashboardFontSize));
+   ResultText(base+"DETAIL",textTime,(middle+bottom)*0.5,detail,C'255,255,255',MathMax(7,DashboardFontSize-1));
+
+   string marker=base+"MARK";
+   if(ObjectFind(0,marker)<0) ObjectCreate(0,marker,OBJ_ARROW,0,closeTime,OrderClosePrice());
+   ObjectMove(0,marker,0,closeTime,OrderClosePrice());
+   ObjectSetInteger(0,marker,OBJPROP_ARROWCODE,159);
+   ObjectSetInteger(0,marker,OBJPROP_COLOR,won?C'255,225,60':C'255,64,96');
+   ObjectSetInteger(0,marker,OBJPROP_WIDTH,2);
+   ObjectSetInteger(0,marker,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,marker,OBJPROP_HIDDEN,true);
+}
+
+void UpdateClosedTradeResults()
+{
+   if(!DrawClosedTradeResults)
+   {
+      ObjectsDeleteAll(0,PREFIX+"RESULT_");
+      return;
+   }
+   int total=OrdersHistoryTotal();
+   if(total==gKnownHistoryTotal) return;
+   gKnownHistoryTotal=total;
+   int drawn=0;
+   for(int i=total-1;i>=0 && drawn<MathMax(1,MaximumResultBoxes);i--)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber) continue;
+      if(OrderType()!=OP_BUY && OrderType()!=OP_SELL) continue;
+      DrawOneClosedResult();
+      drawn++;
+   }
+   ChartRedraw(0);
+}
+
 //+------------------------------------------------------------------+
 void HistoryStats(int &trades,int &wins,int &losses,double &net)
 {
@@ -490,6 +616,7 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    DrawTradeLines();
+   UpdateClosedTradeResults();
    UpdateDashboard();
 }
 
@@ -497,6 +624,7 @@ void OnTick()
 {
    ManageTrailing();
    DrawTradeLines();
+   UpdateClosedTradeResults();
    if(Bars<100) return;
    if(Time[0]==gLastBar) return;
    gLastBar=Time[0];
