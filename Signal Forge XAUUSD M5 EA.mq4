@@ -533,6 +533,37 @@ bool PixelBoxesOverlap(int x1,int y1,int w1,int h1,int x2,int y2,int w2,int h2)
    return (x1<x2+w2+3 && x1+w1+3>x2 && y1<y2+h2+3 && y1+h1+3>y2);
 }
 
+int VisibleSignalFilterCount()
+{
+   if(!gShowEnabledOnly) return 11;
+   int count=0;
+   if(EnableSMA)count++;if(EnableRSI)count++;if(EnableMACD)count++;if(EnableSupertrend)count++;
+   if(EnableStochastic)count++;if(EnableBollinger)count++;if(EnableEMA)count++;if(EnableAO)count++;
+   if(EnableSAR)count++;if(EnableCCI)count++;if(EnableADX)count++;
+   return count;
+}
+
+void KeepResultCardBelowTopPanels(int left,int width,int height,int chartWidth,int chartHeight,int &top)
+{
+   if(!ShowDashboard) return;
+   int gap=10;
+   // Account tracker occupies the upper-left. Any result card in its horizontal
+   // area is moved below the full tracker instead of being drawn over it.
+   if(ShowAccountProfitPanel)
+   {
+      int ax=MathMax(0,AccountPanelX),ay=MathMax(0,AccountPanelY),aw=440,ah=442;
+      if(PixelBoxesOverlap(left,top,width,height,ax,ay,aw,ah)) top=ay+ah+gap;
+   }
+   // Apply the same exclusion to a signal panel positioned along the top.
+   if(SignalPanelPosition==EA_Top_Right || SignalPanelPosition==EA_Top_Left)
+   {
+      int sw=390,sh=94+VisibleSignalFilterCount()*22,sx=10,sy=10;
+      if(SignalPanelPosition==EA_Top_Right) sx=chartWidth-10-sw;
+      if(PixelBoxesOverlap(left,top,width,height,sx,sy,sw,sh)) top=sy+sh+gap;
+   }
+   top=MathMax(8,MathMin(top,chartHeight-height-8));
+}
+
 void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int &usedCount)
 {
    int ticket=OrderTicket();
@@ -577,6 +608,7 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    if(left+width>(int)chartWidth-8) left=anchorX-width-10;
    left=MathMax(8,MathMin(left,(int)chartWidth-width-8));
    int top=MathMax(8,MathMin(anchorY-height/2,(int)chartHeight-height-8));
+   KeepResultCardBelowTopPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
 
    // Collision avoidance: move a card below an existing card, or above it
    // near the lower edge. Text and both raised rows always move together.
@@ -594,6 +626,7 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
       }
       if(!moved) break;
    }
+   KeepResultCardBelowTopPanels(left,width,height,(int)chartWidth,(int)chartHeight,top);
 
    color mainBg=won?C'0,82,185':C'145,20,48';
    color subBg=won?C'0,124,230':C'210,32,68';
@@ -938,9 +971,9 @@ void DrawAccountProfitPanel()
    }
 
    // Separate raised clock and candle-timer cards below the five-day tracker.
-   DrawCell("ACCOUNT","CLOCK_H",EA_Top_Left,x,y,w,h,6,372,214,21,"SERVER TIME",C'255,255,255',C'32,77,145',fs);
+   DrawCell("ACCOUNT","CLOCK_H",EA_Top_Left,x,y,w,h,6,372,214,21,"SERVER TIME",C'255,255,255',C'168,108,0',fs);
    DrawCell("ACCOUNT","COUNT_H",EA_Top_Left,x,y,w,h,220,372,214,21,CurrentTimeframeText()+" CANDLE COUNTDOWN",C'255,255,255',C'78,48,165',fs);
-   DrawCell("ACCOUNT","CLOCK_TIME",EA_Top_Left,x,y,w,h,6,394,214,40,TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),C'255,255,255',C'14,45,82',12);
+   DrawCell("ACCOUNT","CLOCK_TIME",EA_Top_Left,x,y,w,h,6,394,214,40,TimeToString(TimeCurrent(),TIME_SECONDS),C'255,255,255',C'96,61,0',12);
    DrawCell("ACCOUNT","COUNT_TIME",EA_Top_Left,x,y,w,h,220,394,214,40,CurrentCandleCountdown(),C'255,255,255',C'45,24,100',14);
    ObjectSetString(0,PREFIX+"ACCOUNT_T_CLOCK_H",OBJPROP_FONT,"Arial Black");
    ObjectSetString(0,PREFIX+"ACCOUNT_T_COUNT_H",OBJPROP_FONT,"Arial Black");
