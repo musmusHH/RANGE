@@ -200,6 +200,7 @@ input color                  SecTableColor    = C'150,90,255';  // daily table
 input color                  SecPeriodColor   = C'255,175,0';   // by period
 input color                  SecCurveColor    = C'0,215,170';   // equity curve
 input int                    EquityCurveThickness = 2;
+input double                 EquityCurveSmoothPercent = 9.0; // MA window
 
 //---- Range zone rendering (solid cyan slab, raised, behind the candles)
 input bool                   RangeZoneRaised3D = true;       // bevel edges
@@ -276,6 +277,8 @@ bool     g_forceVisualRefresh = false;
 //--- changes, which stops the per-tick delete/recreate flicker.
 string   g_resultCardSignature = "";
 string   g_resultCardTickets = "";
+string   g_perfPanelSignature = "";
+string   g_mainPanelSignature = "";
 //--- screen rectangles occupied by the two dashboards, published by the
 //--- panel painters so chart-layer objects can keep clear of them.
 int      g_panelLeftX1 = 0, g_panelLeftY1 = 0;
@@ -486,6 +489,8 @@ void OnChartEvent(const int id,
          if(g_bentoTheme > 2) g_bentoTheme = 0;
          DeleteObjectsWithPrefix(g_objectPrefix + "BN_");
          DeleteObjectsWithPrefix(g_objectPrefix + "BP_");
+         g_perfPanelSignature = "";
+         g_mainPanelSignature = "";
          g_lastDashboardUpdate = 0;
          g_lastTrackerHistoryCount = -1;
          UpdateStatusDisplay();
@@ -527,6 +532,8 @@ void OnChartEvent(const int id,
       // Scrolling or zooming changes the pixel scale, so the result
       // cards must be rebuilt at the new geometry.
       g_forceVisualRefresh = true;
+      g_perfPanelSignature = "";
+      g_mainPanelSignature = "";
       g_lastTrackerHistoryCount = -1;
       g_lastResultCardHistoryCount = -1;
       g_resultCardSignature = "";
@@ -4500,12 +4507,27 @@ void DrawBentoMainPanel()
    color accA = BentoAccentA();
    color accB = BentoAccentB();
 
+   // The tile chrome (shadows, bodies, bevels, header bands) never
+   // changes between ticks. Only rebuild it when the theme or layout
+   // changes; otherwise just refresh the live values below.
+   string mainSig = IntegerToString(g_bentoTheme) + "|"
+                    + IntegerToString(x) + "|" + IntegerToString(y) + "|"
+                    + IntegerToString(W) + "|"
+                    + IntegerToString(g_entriesPaused ? 1 : 0) + "|"
+                    + IntegerToString(g_rangeActive ? 1 : 0);
+   bool rebuildChrome = (mainSig != g_mainPanelSignature);
+   g_mainPanelSignature = mainSig;
+
    // outer container
+   if(rebuildChrome)
+   {
    SetScreenRectangle(g_objectPrefix + "BN_SHELL_SH", x + 3, y + 4,
                       W + 12, 606, BentoShadow, BentoShadow, 0);
    SetScreenRectangle(g_objectPrefix + "BN_SHELL", x - 6, y - 6,
                       W + 12, 606, BentoShell,
                       BlendColor(accA, BentoShell, 0.35), 0);
+
+   }
 
    g_panelLeftX1 = x - 6;
    g_panelLeftY1 = y - 6;
@@ -4519,7 +4541,7 @@ void DrawBentoMainPanel()
 
    //--- TILE A : equity, wide -----------------------------------------
    int ty = y;
-   BentoCardHead("A", x, ty, W, 100, SecAccountColor, "ACCOUNT EQUITY", 22);
+   if(rebuildChrome) BentoCardHead("A", x, ty, W, 100, SecAccountColor, "ACCOUNT EQUITY", 22);
    BentoLabel("A_V", x + 14, ty + 34, DoubleToString(equity, 2) + " "
               + AccountCurrency(), BrightenColor(SecAccountColor, 0.45), 20, true);
    BentoLabel("A_S", x + 14, ty + 70,
@@ -4534,7 +4556,7 @@ void DrawBentoMainPanel()
    //--- TILE B : range break (left) / TILE C : filters (right) --------
    ty = y + 108;
    int halfW = (W - 10) / 2;
-   BentoCardHead("B", x, ty, halfW, 132, SecRangeColor, "RANGE BREAK", 20);
+   if(rebuildChrome) BentoCardHead("B", x, ty, halfW, 132, SecRangeColor, "RANGE BREAK", 20);
    BentoLabel("B_V", x + 12, ty + 30,
               g_rangeActive ? "ACTIVE" : "WAITING",
               g_rangeActive ? accA : BentoInk, 15, true);
@@ -4556,7 +4578,7 @@ void DrawBentoMainPanel()
    }
 
    int cx = x + halfW + 10;
-   BentoCardHead("C", cx, ty, halfW, 132, SecFilterColor, "FILTERS", 20);
+   if(rebuildChrome) BentoCardHead("C", cx, ty, halfW, 132, SecFilterColor, "FILTERS", 20);
 
    double spread = (Ask - Bid) / Point;
    string fName[4];  bool fState[4];
@@ -4582,13 +4604,13 @@ void DrawBentoMainPanel()
    //--- TILE D : theme  /  TILE E : candle countdown ------------------
    ty = y + 248;
    int themeW = 122;
-   BentoCardHead("D", x, ty, themeW, 70, SecThemeColor, "THEME", 20);
+   if(rebuildChrome) BentoCardHead("D", x, ty, themeW, 70, SecThemeColor, "THEME", 20);
    BentoButton("THEME", x + 10, ty + 30, themeW - 20, 30,
                BentoThemeName(), SecThemeColor);
 
    int cdX = x + themeW + 10;
    int cdW = W - themeW - 10;
-   BentoCardHead("E", cdX, ty, cdW, 70, SecCandleColor, "NEXT CANDLE", 20);
+   if(rebuildChrome) BentoCardHead("E", cdX, ty, cdW, 70, SecCandleColor, "NEXT CANDLE", 20);
    double frac = 0.0;
    string cd = BentoCandleCountdown(frac);
    BentoLabel("E_V", cdX + cdW - 84, ty + 4, cd, clrWhite, 13, true);
@@ -4597,7 +4619,7 @@ void DrawBentoMainPanel()
 
    //--- TILE F : objectives -------------------------------------------
    ty = y + 326;
-   BentoCardHead("F", x, ty, W, 148, SecObjectiveColor, "OBJECTIVES", 22);
+   if(rebuildChrome) BentoCardHead("F", x, ty, W, 148, SecObjectiveColor, "OBJECTIVES", 22);
 
    double lossUsed = 0.0;
    if(MaximumDailyLossPercent > 0.0 && g_dailyNetResult < 0.0)
@@ -4632,7 +4654,7 @@ void DrawBentoMainPanel()
 
    //--- TILE G : execution + pause ------------------------------------
    ty = y + 486;
-   BentoCardHead("G", x, ty, W, 104, SecExecColor, "EXECUTION", 20);
+   if(rebuildChrome) BentoCardHead("G", x, ty, W, 104, SecExecColor, "EXECUTION", 20);
    BentoLabel("G_L", x + 14, ty + 26,
               Symbol() + " / " + TimeframeText(Period())
               + "    LOT " + (LotSizingMode == LOT_FIXED
@@ -4653,6 +4675,23 @@ void DrawBentoMainPanel()
 //+------------------------------------------------------------------+
 void DrawBentoPerformancePanel()
 {
+   // The table, the period block and the equity curve together create
+   // several hundred objects. Rebuilding them on every tick is what
+   // makes a visual backtest crawl, so they are only redrawn when the
+   // trade history, the day, the theme or the chart size changes.
+   long chartWpx = 0, chartHpx = 0;
+   ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0, chartWpx);
+   ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0, chartHpx);
+   string perfSig = IntegerToString(OrdersHistoryTotal()) + "|"
+                    + IntegerToString(BrokerDayKey(TimeCurrent())) + "|"
+                    + IntegerToString(g_bentoTheme) + "|"
+                    + IntegerToString((int)chartWpx) + "|"
+                    + IntegerToString((int)chartHpx) + "|"
+                    + IntegerToString(OrdersTotal());
+   if(perfSig == g_perfPanelSignature)
+      return;
+   g_perfPanelSignature = perfSig;
+
    int days = ProfitTrackerDays;
    if(days < 1) days = 1;
    if(days > 60) days = 60;
@@ -5070,30 +5109,50 @@ void BentoDrawEquityCurve(const int x, const int y, const int W,
       raw[c] = curve[i0] * (1.0 - f) + curve[i1] * f;
    }
 
-   // centred moving average; window scales with the sample density
-   int win = (int)MathRound((double)cols / MathMax(pts - 1, 1) * 1.5);
-   if(win < 2) win = 2;
-   if(win > 14) win = 14;
+   // Centred moving average, applied twice. A single narrow pass still
+   // left visible corners; a wide window run twice produces the rounded
+   // MA-style line. The window is a fraction of the plot width so the
+   // shape looks the same regardless of trade count.
+   int win = (int)MathRound(cols * EquityCurveSmoothPercent / 100.0);
+   if(win < 3) win = 3;
+   if(win > cols / 3) win = cols / 3;
+   if(win < 1) win = 1;
 
-   double smooth[];
+   double smooth[], tmp[];
    ArrayResize(smooth, cols);
+   ArrayResize(tmp, cols);
    ArrayInitialize(smooth, 0.0);
-   for(int m = 0; m < cols; m++)
+   ArrayInitialize(tmp, 0.0);
+
+   for(int pass = 0; pass < 2; pass++)
    {
-      double acc = 0.0;
-      int n = 0;
-      for(int w = -win; w <= win; w++)
+      for(int m = 0; m < cols; m++)
       {
-         int q = m + w;
-         if(q < 0 || q > cols - 1) continue;
-         acc += raw[q];
-         n++;
+         double acc = 0.0;
+         int n = 0;
+         for(int w = -win; w <= win; w++)
+         {
+            int q = m + w;
+            if(q < 0 || q > cols - 1) continue;
+            acc += (pass == 0 ? raw[q] : tmp[q]);
+            n++;
+         }
+         smooth[m] = n > 0 ? acc / n : raw[m];
       }
-      smooth[m] = n > 0 ? acc / n : raw[m];
+      if(pass == 0)
+         for(int cp = 0; cp < cols; cp++) tmp[cp] = smooth[cp];
    }
-   // keep the endpoints honest so the final equity is not averaged away
-   smooth[0] = raw[0];
-   smooth[cols - 1] = raw[cols - 1];
+
+   // Blend back toward the true series at the two ends so the start and
+   // final equity remain accurate while the middle stays smooth.
+   int blend = win;
+   for(int e = 0; e < blend && e < cols; e++)
+   {
+      double k = (double)e / blend;
+      smooth[e] = raw[e] * (1.0 - k) + smooth[e] * k;
+      int r2 = cols - 1 - e;
+      smooth[r2] = raw[r2] * (1.0 - k) + smooth[r2] * k;
+   }
 
    int thick = EquityCurveThickness;
    if(thick < 1) thick = 1;
