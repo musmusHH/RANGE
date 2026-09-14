@@ -96,7 +96,8 @@ input bool DrawEntrySLTPLines = true;
 input bool DrawClosedTradeResults = true;
 input int  MaximumResultBoxes = 50;
 input int  ResultBoxPaddingPixels = 8;
-input int  ResultMovementRefreshMs = 100;
+input bool MoveResultCardsEveryTick = true;
+input int  ResultMovementRefreshMs = 100; // fallback when every-tick mode is off
 
 string PREFIX="SF_EA_";
 datetime gLastBar=0;
@@ -1102,14 +1103,13 @@ void OnTick()
       UpdateEquityCurve();
       DrawTradeLines();
    }
-   else if(allowGraphics && IsVisualMode())
+   else if(allowGraphics)
    {
-      // Tester auto-scroll does not reliably emit CHARTEVENT_CHART_CHANGE.
-      // Re-anchor cards on ticks at a wall-clock throttle for smooth movement
-      // without performing graphical work on every generated test tick.
+      // Keep every result card locked to its trade-close time/price as the
+      // live chart or Visual Tester advances. Every-tick mode has no delay.
       uint motionNow=GetTickCount();
       uint refreshDelay=(uint)MathMax(25,ResultMovementRefreshMs);
-      if(motionNow-gLastChartResultRefresh>=refreshDelay)
+      if(MoveResultCardsEveryTick || motionNow-gLastChartResultRefresh>=refreshDelay)
       {
          gKnownResultHistory=-1;
          UpdateClosedTradeResults();
