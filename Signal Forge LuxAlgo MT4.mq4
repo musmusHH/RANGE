@@ -27,13 +27,23 @@
 // validate them against your broker history before live use.
 input bool RequireAllEnabledIndicatorsToAlign = true;
 
-// Risk management (ATR)
+// Risk management
+// Money-risk mode is the default for XAUUSDr: at 0.01 lot, risk 0.5% of
+// account balance between entry and SL; TP is set by RewardRiskRatio.
+input bool   EnableRiskBasedSLTP = true;
+input double RiskLotSize         = 0.01;
+input double RiskPerTradePercent = 0.5;
+input double RewardRiskRatio     = 2.0;
+input double RiskReferenceBalance= 0.0; // 0 = current MT4 account balance
+
+// Legacy ATR SL/TP remain available but disabled as requested. When money-risk
+// mode is enabled it takes priority over these ATR distance settings.
 input int    ATRLength          = 14;
-input bool   EnableTakeProfit   = true;
+input bool   EnableTakeProfit   = false;
 input double TakeProfitATR      = 2.4;
-input bool   EnableStopLoss     = true;
+input bool   EnableStopLoss     = false;
 input double StopLossATR        = 1.8;
-input bool   EnableTrailingStop = true;
+input bool   EnableTrailingStop = false;
 input double TrailingStopATR    = 1.2;
 
 // Visuals
@@ -253,6 +263,22 @@ color RateColor(double value,int count)
    return C'255,64,96';
 }
 
+// Converts account risk into a symbol price distance using the broker's tick
+// size and tick value. Example: 0.01 lot and 0.5 means the SL loss equals
+// approximately 0.5% of the selected reference balance before costs/slippage.
+double MoneyRiskPriceDistance()
+{
+   double lots=MathMax(RiskLotSize,MarketInfo(Symbol(),MODE_MINLOT));
+   double balance=(RiskReferenceBalance>0.0)?RiskReferenceBalance:AccountBalance();
+   double riskMoney=balance*MathMax(0.0,RiskPerTradePercent)/100.0;
+   double tickSize=MarketInfo(Symbol(),MODE_TICKSIZE);
+   double tickValue=MarketInfo(Symbol(),MODE_TICKVALUE);
+   if(tickSize<=0.0) tickSize=Point;
+   if(riskMoney<=0.0 || tickValue<=0.0 || lots<=0.0) return 0.0;
+   double distance=riskMoney*tickSize/(lots*tickValue);
+   return MathMax(Point,NormalizeDouble(distance,Digits));
+}
+
 string StatusText(bool bull, bool bear)
 {
    if(bull) return "BULLISH";
@@ -298,6 +324,11 @@ int OnCalculate(const int rates_total,const int prev_calculated,
    ArrayInitialize(ShortGlow1,EMPTY_VALUE); ArrayInitialize(ShortGlow2,EMPTY_VALUE); ArrayInitialize(ShortGlow3,EMPTY_VALUE);
    ArrayInitialize(ExitLongBuffer,EMPTY_VALUE); ArrayInitialize(ExitShortBuffer,EMPTY_VALUE);
    ArrayInitialize(StopBuffer,EMPTY_VALUE); ArrayInitialize(TargetBuffer,EMPTY_VALUE); ArrayInitialize(TrailBuffer,EMPTY_VALUE);
+
+   double riskDistance=MoneyRiskPriceDistance();
+   bool riskMode=(EnableRiskBasedSLTP && riskDistance>0.0);
+   bool slActive=(riskMode || EnableStopLoss);
+   bool tpActive=(riskMode || EnableTakeProfit);
 
    // Combined backtester state
    int tradeState=0,totalTrades=0,winTrades=0;
@@ -423,15 +454,15 @@ int OnCalculate(const int rates_total,const int prev_calculated,
          bool exL=false,exS=false; double exPrice=0;
          if(indState[j]==1)
          {
-            if(EnableStopLoss && low[i]<=indSL[j]) { exL=true; exPrice=indSL[j]; }
-            else if(EnableTakeProfit && high[i]>=indTP[j]) { exL=true; exPrice=indTP[j]; }
+            if(slActive && low[i]<=indSL[j]) { exL=true; exPrice=indSL[j]; }
+            else if(tpActive && high[i]>=indTP[j]) { exL=true; exPrice=indTP[j]; }
             else if(EnableTrailingStop && low[i]<=indTS[j]) { exL=true; exPrice=indTS[j]; }
             else if(bear[j]) { exL=true; exPrice=close[i]; }
          }
          if(indState[j]==-1)
          {
-            if(EnableStopLoss && high[i]>=indSL[j]) { exS=true; exPrice=indSL[j]; }
-            else if(EnableTakeProfit && low[i]<=indTP[j]) { exS=true; exPrice=indTP[j]; }
+            if(slActive && high[i]>=indSL[j]) { exS=true; exPrice=indSL[j]; }
+            else if(tpActive && low[i]<=indTP[j]) { exS=true; exPrice=indTP[j]; }
             else if(EnableTrailingStop && high[i]>=indTS[j]) { exS=true; exPrice=indTS[j]; }
             else if(bull[j]) { exS=true; exPrice=close[i]; }
          }
@@ -446,15 +477,31 @@ int OnCalculate(const int rates_total,const int prev_calculated,
          if(newL)
          {
             indState[j]=1; indEntry[j]=close[i];
-            if(EnableStopLoss) indSL[j]=close[i]-atr*StopLossATR;
-            if(EnableTakeProfit) indTP[j]=close[i]+atr*TakeProfitATR;
+            if(riskMode)
+            {
+               indSL[j]=NormalizeDouble(close[i]-riskDistance,Digits);
+               indTP[j]=NormalizeDouble(close[i]+riskDistance*RewardRiskRatio,Digits);
+            }
+            else
+            {
+               if(EnableStopLoss) indSL[j]=close[i]-atr*StopLossATR;
+               if(EnableTakeProfit) indTP[j]=close[i]+atr*TakeProfitATR;
+            }
             if(EnableTrailingStop) indTS[j]=close[i]-atr*TrailingStopATR;
          }
          if(newS)
          {
             indState[j]=-1; indEntry[j]=close[i];
-            if(EnableStopLoss) indSL[j]=close[i]+atr*StopLossATR;
-            if(EnableTakeProfit) indTP[j]=close[i]-atr*TakeProfitATR;
+            if(riskMode)
+            {
+               indSL[j]=NormalizeDouble(close[i]+riskDistance,Digits);
+               indTP[j]=NormalizeDouble(close[i]-riskDistance*RewardRiskRatio,Digits);
+            }
+            else
+            {
+               if(EnableStopLoss) indSL[j]=close[i]+atr*StopLossATR;
+               if(EnableTakeProfit) indTP[j]=close[i]-atr*TakeProfitATR;
+            }
             if(EnableTrailingStop) indTS[j]=close[i]+atr*TrailingStopATR;
          }
          if(indState[j]==1 && !newL && EnableTrailingStop) indTS[j]=MathMax(indTS[j],close[i]-atr*TrailingStopATR);
@@ -482,15 +529,15 @@ int OnCalculate(const int rates_total,const int prev_calculated,
       bool exitL=false,exitS=false; double exitPrice=0;
       if(tradeState==1)
       {
-         if(EnableStopLoss && low[i]<=slLevel) { exitL=true; exitPrice=slLevel; }
-         else if(EnableTakeProfit && high[i]>=tpLevel) { exitL=true; exitPrice=tpLevel; }
+         if(slActive && low[i]<=slLevel) { exitL=true; exitPrice=slLevel; }
+         else if(tpActive && high[i]>=tpLevel) { exitL=true; exitPrice=tpLevel; }
          else if(EnableTrailingStop && low[i]<=tsLevel) { exitL=true; exitPrice=tsLevel; }
          else if(sht) { exitL=true; exitPrice=close[i]; }
       }
       if(tradeState==-1)
       {
-         if(EnableStopLoss && high[i]>=slLevel) { exitS=true; exitPrice=slLevel; }
-         else if(EnableTakeProfit && low[i]<=tpLevel) { exitS=true; exitPrice=tpLevel; }
+         if(slActive && high[i]>=slLevel) { exitS=true; exitPrice=slLevel; }
+         else if(tpActive && low[i]<=tpLevel) { exitS=true; exitPrice=tpLevel; }
          else if(EnableTrailingStop && high[i]>=tsLevel) { exitS=true; exitPrice=tsLevel; }
          else if(lng) { exitS=true; exitPrice=close[i]; }
       }
@@ -507,15 +554,31 @@ int OnCalculate(const int rates_total,const int prev_calculated,
       if(enterL)
       {
          tradeState=1; entryPrice=close[i];
-         if(EnableStopLoss) slLevel=close[i]-atr*StopLossATR;
-         if(EnableTakeProfit) tpLevel=close[i]+atr*TakeProfitATR;
+         if(riskMode)
+         {
+            slLevel=NormalizeDouble(close[i]-riskDistance,Digits);
+            tpLevel=NormalizeDouble(close[i]+riskDistance*RewardRiskRatio,Digits);
+         }
+         else
+         {
+            if(EnableStopLoss) slLevel=close[i]-atr*StopLossATR;
+            if(EnableTakeProfit) tpLevel=close[i]+atr*TakeProfitATR;
+         }
          if(EnableTrailingStop) tsLevel=close[i]-atr*TrailingStopATR;
       }
       if(enterS)
       {
          tradeState=-1; entryPrice=close[i];
-         if(EnableStopLoss) slLevel=close[i]+atr*StopLossATR;
-         if(EnableTakeProfit) tpLevel=close[i]-atr*TakeProfitATR;
+         if(riskMode)
+         {
+            slLevel=NormalizeDouble(close[i]+riskDistance,Digits);
+            tpLevel=NormalizeDouble(close[i]-riskDistance*RewardRiskRatio,Digits);
+         }
+         else
+         {
+            if(EnableStopLoss) slLevel=close[i]+atr*StopLossATR;
+            if(EnableTakeProfit) tpLevel=close[i]-atr*TakeProfitATR;
+         }
          if(EnableTrailingStop) tsLevel=close[i]+atr*TrailingStopATR;
       }
       if(tradeState==1 && !enterL && EnableTrailingStop) tsLevel=MathMax(tsLevel,close[i]-atr*TrailingStopATR);
@@ -528,8 +591,8 @@ int OnCalculate(const int rates_total,const int prev_calculated,
       if(exitS && !enterL) ExitShortBuffer[i]=low[i]-MathMax(Point*5,atr*0.15);
       if(tradeState!=0 && !enterL && !enterS)
       {
-         if(EnableStopLoss) StopBuffer[i]=slLevel;
-         if(EnableTakeProfit) TargetBuffer[i]=tpLevel;
+         if(slActive) StopBuffer[i]=slLevel;
+         if(tpActive) TargetBuffer[i]=tpLevel;
          if(EnableTrailingStop) TrailBuffer[i]=tsLevel;
       }
 
@@ -594,8 +657,10 @@ int OnCalculate(const int rates_total,const int prev_calculated,
       string pf=(pfValue>=999.0)?"MAX":DoubleToString(pfValue,2);
       int qx=10,qy=10,qw=460,qh=100;
       DrawPanel("PERF",PerformanceDashboardPosition,qx,qy,qw,qh);
+      string perfTitle=riskMode ? StringFormat("RISK BACKTEST | %.2f%% | %.2f LOT | RR %.2f",RiskPerTradePercent,RiskLotSize,RewardRiskRatio)
+                                : "PERFORMANCE | ATR / SIGNAL BACKTEST";
       DrawRaisedCell("PERF","TITLE",PerformanceDashboardPosition,qx,qy,qw,qh,6,6,448,28,
-                     "PERFORMANCE  |  INTERNAL BAR BACKTEST",C'255,255,255',C'0,105,160',fs+1);
+                     perfTitle,C'255,255,255',C'0,105,160',fs+1);
       string heads[6]; heads[0]="TRADES";heads[1]="WINS";heads[2]="LOSSES";heads[3]="WIN RATE";heads[4]="PF";heads[5]="PNL %";
       int widths[6]; widths[0]=74;widths[1]=62;widths[2]=62;widths[3]=84;widths[4]=78;widths[5]=88;
       string vals[6]; vals[0]=IntegerToString(totalTrades);vals[1]=IntegerToString(winTrades);vals[2]=IntegerToString(losses);
