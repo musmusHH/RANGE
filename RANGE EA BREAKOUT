@@ -4829,7 +4829,7 @@ void DrawBentoPerformancePanel()
 
    int headH = 38;
    int tableH = 52 + rows * rowH + 12;
-   int barsH = 252;
+   int barsH = 296;
    int curveTileH = 196;
    int shellH = headH + tableH + barsH + curveTileH + 38;
 
@@ -4912,11 +4912,31 @@ void DrawBentoPerformancePanel()
    if(peak <= 0.0) peak = 1.0;
 
    // Column header so every number below is self-describing.
+   // Drawdown per period, computed from the chronological balance.
+   double ddAbs[4] = {0.0, 0.0, 0.0, 0.0};
+   double ddPct[4] = {0.0, 0.0, 0.0, 0.0};
+   int    ddStreak[4] = {0, 0, 0, 0};
+   double ddStreakLoss[4] = {0.0, 0.0, 0.0, 0.0};
+
+   double openBal = AccountBalance() - tlP;
+   if(openBal <= 0.0) openBal = AccountBalance();
+
+   datetime ddFrom[4];
+   ddFrom[0] = todayStart;
+   ddFrom[1] = weekStart;
+   ddFrom[2] = monthStart;
+   ddFrom[3] = 0;
+   for(int dz = 0; dz < 4; dz++)
+      BentoPeriodDrawdown(eqTime, eqProfit, eqCount, ddFrom[dz], openBal,
+                          ddAbs[dz], ddPct[dz], ddStreak[dz],
+                          ddStreakLoss[dz]);
+
    BentoPerfMonoBold("G_H", x + 14, by + 32,
-                     PadRight("PERIOD", 10) + PadLeft("NET", 10)
-                     + PadLeft("TRD", 5) + PadLeft("WIN%", 7)
-                     + PadLeft("PF", 7) + PadLeft("BEST", 9)
-                     + PadLeft("WORST", 9) + PadLeft("LOTS", 7),
+                     PadRight("PERIOD", 9) + PadLeft("NET", 9)
+                     + PadLeft("TRD", 5) + PadLeft("WIN%", 6)
+                     + PadLeft("PF", 6) + PadLeft("MAX DD", 9)
+                     + PadLeft("DD%", 7) + PadLeft("BEST", 8)
+                     + PadLeft("WORST", 8),
                      BrightenColor(SecPeriodColor, 0.50), 8);
 
    int rowY0 = by + 50;
@@ -4929,47 +4949,73 @@ void DrawBentoPerformancePanel()
                   ? pGrossWin[b2] / MathAbs(pGrossLoss[b2]) : 0.0;
       color bc = vals[b2] >= 0.0 ? accA : accB;
 
-      string line = PadRight(names[b2], 10)
-                    + PadLeft(SignedNumber(vals[b2], 2), 10)
+      string line = PadRight(names[b2], 9)
+                    + PadLeft(SignedNumber(vals[b2], 2), 9)
                     + PadLeft(IntegerToString(pTrades[b2]), 5)
-                    + PadLeft(DoubleToString(wrv, 0) + "%", 7)
-                    + PadLeft(pf > 0.0 ? DoubleToString(pf, 2) : "-", 7)
-                    + PadLeft(SignedNumber(pBest[b2], 2), 9)
-                    + PadLeft(SignedNumber(pWorst[b2], 2), 9)
-                    + PadLeft(DoubleToString(pLots[b2], 2), 7);
+                    + PadLeft(DoubleToString(wrv, 0) + "%", 6)
+                    + PadLeft(pf > 0.0 ? DoubleToString(pf, 2) : "-", 6)
+                    + PadLeft(DoubleToString(ddAbs[b2], 2), 9)
+                    + PadLeft(DoubleToString(ddPct[b2], 1) + "%", 7)
+                    + PadLeft(SignedNumber(pBest[b2], 2), 8)
+                    + PadLeft(SignedNumber(pWorst[b2], 2), 8);
       BentoPerfMono("PR" + IntegerToString(b2), x + 14,
                     rowY0 + b2 * prH, line, bc, 8);
    }
 
-   //--- compact bar strip: net (filled) vs win rate (thin) ---------------
-   int stripY = rowY0 + 4 * prH + 10;
-   int stripBase = stripY + 46;
+   //--- paired bars: net profit up, drawdown down from a shared base ----
+   double ddPeak = 0.0;
+   for(int dp = 0; dp < 4; dp++)
+      if(ddAbs[dp] > ddPeak) ddPeak = ddAbs[dp];
+   if(ddPeak <= 0.0) ddPeak = 1.0;
+
+   int stripBase = rowY0 + 4 * prH + 64;
    int slotW = (W - 36) / 4;
    for(int b3 = 0; b3 < 4; b3++)
    {
       int bx = x + 18 + b3 * slotW;
-      double wrv = pTrades[b3] > 0
-                   ? (double)pWins[b3] / pTrades[b3] * 100.0 : 0.0;
       color bc = vals[b3] >= 0.0 ? accA : accB;
-      BentoPerfVBar("VB" + IntegerToString(b3), bx, stripBase, 30, 40,
+
+      // profit bar rises from the baseline
+      BentoPerfVBar("VB" + IntegerToString(b3), bx, stripBase, 26, 40,
                     MathAbs(vals[b3]) / peak, bc);
-      BentoPerfVBar("VW" + IntegerToString(b3), bx + 36, stripBase, 14, 40,
-                    wrv / 100.0, BlendColor(bc, BentoTile, 0.55));
-      BentoPerfLabel("VN" + IntegerToString(b3), bx, stripBase + 6,
+      BentoPerfLabel("VV" + IntegerToString(b3), bx, stripBase - 54,
+                     SignedNumber(vals[b3], 0), bc, 7, true);
+
+      // drawdown bar hangs below the same baseline
+      BentoPerfVBarDown("VD" + IntegerToString(b3), bx + 30, stripBase,
+                        26, 34, ddAbs[b3] / ddPeak, SecExecColor);
+      BentoPerfLabel("VDL" + IntegerToString(b3), bx + 30, stripBase + 38,
+                     "-" + DoubleToString(ddAbs[b3], 0), SecExecColor, 7, true);
+
+      BentoPerfLabel("VN" + IntegerToString(b3), bx, stripBase + 4,
                      names[b3], BentoInk, 8, true);
    }
+   SetScreenRectangle(g_objectPrefix + "BP_VBASE", x + 14, stripBase,
+                      W - 28, 1, BrightenColor(BentoTile, 0.35),
+                      BrightenColor(BentoTile, 0.35), 6);
+   BentoPerfLabel("VLEGEND", x + W - 132, stripBase - 54,
+                  "NET / DRAWDOWN", BentoInk, 7, false);
 
    //--- footer -----------------------------------------------------------
    double avgWin = pWins[3] > 0 ? pGrossWin[3] / pWins[3] : 0.0;
    int lossCount = pTrades[3] - pWins[3];
    double avgLoss = lossCount > 0 ? pGrossLoss[3] / lossCount : 0.0;
    double expectancy = pTrades[3] > 0 ? tlP / pTrades[3] : 0.0;
-   BentoPerfLabel("G_F", x + 14, by + barsH - 22,
+   double recovery = ddAbs[3] > 0.0 ? tlP / ddAbs[3] : 0.0;
+   BentoPerfLabel("G_F", x + 14, by + barsH - 38,
                   "AVG WIN " + SignedNumber(avgWin, 2)
                   + "   AVG LOSS " + SignedNumber(avgLoss, 2)
                   + "   EXPECTANCY " + SignedNumber(expectancy, 2)
                   + "   GAIN " + SignedNumber(TrackerGainPercent(tlP), 2) + "%",
                   tlP >= 0.0 ? accA : accB, 8, true);
+   BentoPerfLabel("G_F2", x + 14, by + barsH - 22,
+                  "MAX DD " + DoubleToString(ddAbs[3], 2)
+                  + " (" + DoubleToString(ddPct[3], 2) + "%)"
+                  + "   RECOVERY " + (recovery > 0.0
+                                      ? DoubleToString(recovery, 2) : "-")
+                  + "   WORST STREAK " + IntegerToString(ddStreak[3])
+                  + " (" + SignedNumber(ddStreakLoss[3], 2) + ")",
+                  ddAbs[3] > 0.0 ? SecExecColor : BentoInk, 8, true);
 
    //--- EQUITY CURVE (tester style) --------------------------------------
    int cy = by + barsH + 8;
@@ -4979,6 +5025,61 @@ void DrawBentoPerformancePanel()
 
    BentoDrawEquityCurve(x, cy, W, curveH, eqTime, eqProfit, eqCount,
                         accA, accB);
+}
+
+//+------------------------------------------------------------------+
+//| Peak-to-trough drawdown for every trade closed at or after        |
+//| startTime. Works on the chronological running balance, so it is   |
+//| the same definition the strategy tester reports.                  |
+//+------------------------------------------------------------------+
+void BentoPeriodDrawdown(datetime &times[], double &profits[],
+                         const int count, const datetime startTime,
+                         const double openingBalance,
+                         double &maxDD, double &maxDDPercent,
+                         int &worstStreak, double &worstStreakLoss)
+{
+   maxDD = 0.0;
+   maxDDPercent = 0.0;
+   worstStreak = 0;
+   worstStreakLoss = 0.0;
+
+   double run = openingBalance;
+   double peak = openingBalance;
+   int streak = 0;
+   double streakLoss = 0.0;
+
+   // profits[] is newest-first, so walk it backwards for chronology.
+   for(int i = count - 1; i >= 0; i--)
+   {
+      if(times[i] < startTime)
+         continue;
+
+      run += profits[i];
+      if(run > peak) peak = run;
+
+      double dd = peak - run;
+      if(dd > maxDD)
+      {
+         maxDD = dd;
+         if(peak > 0.0) maxDDPercent = dd / peak * 100.0;
+      }
+
+      if(profits[i] < 0.0)
+      {
+         streak++;
+         streakLoss += profits[i];
+         if(streak > worstStreak)
+         {
+            worstStreak = streak;
+            worstStreakLoss = streakLoss;
+         }
+      }
+      else
+      {
+         streak = 0;
+         streakLoss = 0.0;
+      }
+   }
 }
 
 //--- accumulate one closed trade into a period bucket ------------------
@@ -5168,6 +5269,35 @@ void BentoDrawEquityCurve(const int x, const int y, const int W,
    if(thick < 1) thick = 1;
    if(thick > 5) thick = 5;
 
+   // Underwater shading: the vertical gap between the running peak and
+   // the current equity, so drawdown periods are visible on the curve.
+   double peakLine[];
+   ArrayResize(peakLine, cols);
+   ArrayInitialize(peakLine, 0.0);
+   double pk = raw[0];
+   for(int pz = 0; pz < cols; pz++)
+   {
+      if(raw[pz] > pk) pk = raw[pz];
+      peakLine[pz] = pk;
+   }
+   int ddSeg = 0;
+   for(int uz = 0; uz < cols && ddSeg < 240; uz += 2)
+   {
+      if(peakLine[uz] - raw[uz] <= 0.0) continue;
+      int uxp = plotL + (int)((double)plotW * uz / (cols - 1));
+      int uyTop = plotB - (int)((peakLine[uz] - lo) / span * plotH);
+      int uyBot = plotB - (int)((raw[uz] - lo) / span * plotH);
+      int uh = uyBot - uyTop;
+      if(uh < 1) continue;
+      SetScreenRectangle(g_objectPrefix + "BP_EQD" + IntegerToString(ddSeg),
+                         uxp, uyTop, 2, uh,
+                         BrightenColor(SecExecColor, -0.35),
+                         BrightenColor(SecExecColor, -0.35), 6);
+      ddSeg++;
+   }
+   for(int dclr = ddSeg; dclr < 240; dclr++)
+      DeleteObjectIfExists(g_objectPrefix + "BP_EQD" + IntegerToString(dclr));
+
    int seg = 0;
    int prevX = plotL;
    int prevY = plotB - (int)((smooth[0] - lo) / span * plotH);
@@ -5274,6 +5404,29 @@ void BentoPerfMono(const string key, const int x, const int y,
    string name = g_objectPrefix + "BP_" + key;
    SetCardLabel(name, x, y, text, c, size, false);
    ObjectSetString(0, name, OBJPROP_FONT, g_styleMonoFont);
+}
+
+// Vertical bar hanging DOWN from a baseline, for drawdown columns.
+void BentoPerfVBarDown(const string key, const int x, const int baseY,
+                       const int w, const int maxH, const double ratio,
+                       const color accent)
+{
+   string b = g_objectPrefix + "BP_" + key;
+   double r = ratio;
+   if(r < 0.0) r = 0.0;
+   if(r > 1.0) r = 1.0;
+   int hh = (int)(maxH * r);
+   if(hh < 2) hh = 2;
+   SetScreenRectangle(b + "_TR", x, baseY, w, maxH,
+                      BrightenColor(BentoTile, -0.50),
+                      BrightenColor(BentoTile, -0.25), 3);
+   SetScreenRectangle(b + "_BR", x, baseY, w, hh, accent, accent, 4);
+   SetScreenRectangle(b + "_CAP", x, baseY + hh - 2, w, 2,
+                      BrightenColor(accent, -0.40),
+                      BrightenColor(accent, -0.40), 5);
+   SetScreenRectangle(b + "_EDG", x + w - 2, baseY, 2, hh,
+                      BrightenColor(accent, -0.40),
+                      BrightenColor(accent, -0.40), 5);
 }
 
 void BentoPerfMonoBold(const string key, const int x, const int y,
