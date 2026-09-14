@@ -182,9 +182,12 @@ void DrawRaisedCell(string group,string id,SF_CORNER pos,
    bool bottom=(pos==Bottom_Right || pos==Bottom_Left);
    int corner=CornerValue(pos);
 
-   // Rectangle coordinates use the edge selected by OBJPROP_CORNER.
-   int rx=right ? panelX+panelW-left-width : panelX+left;
-   int ry=bottom ? panelY+panelH-top-height : panelY+top;
+   // OBJ_RECTANGLE_LABEL always extends right/down from its object origin,
+   // even when a right or lower chart corner is selected. Therefore its
+   // origin must include the full remaining panel width/height. Text labels
+   // use a centre anchor and follow different coordinate rules below.
+   int rx=right ? panelX+panelW-left : panelX+left;
+   int ry=bottom ? panelY+panelH-top : panelY+top;
    string rect=PREFIX+group+"_CELL_"+id;
    if(ObjectFind(0,rect)<0) ObjectCreate(0,rect,OBJ_RECTANGLE_LABEL,0,0,0);
    ObjectSetInteger(0,rect,OBJPROP_CORNER,corner);
@@ -220,8 +223,11 @@ void DrawPanel(string group,SF_CORNER pos,int x,int y,int width,int height)
    string n=PREFIX+group+"_PANEL";
    if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0);
    ObjectSetInteger(0,n,OBJPROP_CORNER,CornerValue(pos));
-   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
-   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   bool right=(pos==Top_Right || pos==Bottom_Right);
+   bool bottom=(pos==Bottom_Right || pos==Bottom_Left);
+   // Rectangle labels extend right/down regardless of chart corner.
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,right ? x+width : x);
+   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,bottom ? y+height : y);
    ObjectSetInteger(0,n,OBJPROP_XSIZE,width);
    ObjectSetInteger(0,n,OBJPROP_YSIZE,height);
    ObjectSetInteger(0,n,OBJPROP_BGCOLOR,C'12,16,28');
