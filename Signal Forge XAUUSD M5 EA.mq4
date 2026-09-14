@@ -103,6 +103,15 @@ bool gShowEnabledOnly=false;
 CCanvas gEquityCanvas;
 bool gEquityCanvasReady=false;
 int gEquityCanvasWidth=0,gEquityCanvasHeight=0;
+int gEquityChartHeight=0,gEquityHistoryTotal=-1;
+int gKnownResultHistory=-1;
+bool gChartLayoutDirty=false;
+// Incremental Supertrend cache: after one seed pass, only one bar is
+// calculated per new candle instead of replaying 600 bars twice.
+bool gSTReady=false;
+double gSTUpper=0,gSTLower=0,gSTLine=0,gSTClose=0;
+int gSTDirection=0,gSTPreviousDirection=0;
+datetime gSTTime=0,gSTPreviousTime=0;
 string FILTER_BUTTON_NAME="SF_EA_SIG_FILTER_BUTTON";
 
 //+------------------------------------------------------------------+
@@ -239,36 +248,48 @@ void ApplyChartTheme()
 }
 
 //+------------------------------------------------------------------+
+void AdvanceSupertrend(int shift)
+{
+   double atr=iATR(NULL,0,MathMax(1,SupertrendLength),shift);
+   double upper=(High[shift]+Low[shift])*0.5+SupertrendFactor*atr;
+   double lower=(High[shift]+Low[shift])*0.5-SupertrendFactor*atr;
+   double finalUpper=upper,finalLower=lower,st=upper;
+   int direction=1;
+   if(!gSTReady || atr<=0)
+   {
+      if(atr>0) gSTReady=true;
+   }
+   else
+   {
+      finalUpper=(upper<gSTUpper || gSTClose>gSTUpper)?upper:gSTUpper;
+      finalLower=(lower>gSTLower || gSTClose<gSTLower)?lower:gSTLower;
+      if(gSTLine==gSTUpper) st=(Close[shift]>finalUpper)?finalLower:finalUpper;
+      else st=(Close[shift]<finalLower)?finalUpper:finalLower;
+      direction=(st==finalLower)?-1:1;
+   }
+   gSTPreviousTime=gSTTime;
+   gSTPreviousDirection=gSTDirection;
+   gSTUpper=finalUpper;gSTLower=finalLower;gSTLine=st;gSTClose=Close[shift];
+   gSTDirection=gSTReady?direction:0;
+   gSTTime=Time[shift];
+}
+
 int SupertrendDirection(int shift)
 {
-   int oldest=MathMin(Bars-2,shift+600);
-   if(oldest<=shift) return 0;
-   bool ready=false;
-   double prevUpper=0,prevLower=0,prevST=0,prevClose=0;
-   int result=0;
-   for(int i=oldest;i>=shift;i--)
+   if(Time[shift]==gSTTime) return gSTDirection;
+   if(Time[shift]==gSTPreviousTime) return gSTPreviousDirection;
+   // Normal sequential tester/live path: advance only the newly closed bar.
+   if(gSTTime!=0 && shift+1<Bars && Time[shift+1]==gSTTime)
    {
-      double atr=iATR(NULL,0,MathMax(1,SupertrendLength),i);
-      double upper=(High[i]+Low[i])*0.5+SupertrendFactor*atr;
-      double lower=(High[i]+Low[i])*0.5-SupertrendFactor*atr;
-      double finalUpper=upper,finalLower=lower,st=upper;
-      int direction=1;
-      if(!ready || atr<=0)
-      {
-         if(atr>0) ready=true;
-      }
-      else
-      {
-         finalUpper=(upper<prevUpper || prevClose>prevUpper)?upper:prevUpper;
-         finalLower=(lower>prevLower || prevClose<prevLower)?lower:prevLower;
-         if(prevST==prevUpper) st=(Close[i]>finalUpper)?finalLower:finalUpper;
-         else st=(Close[i]<finalLower)?finalUpper:finalLower;
-         direction=(st==finalLower)?-1:1;
-      }
-      prevUpper=finalUpper; prevLower=finalLower; prevST=st; prevClose=Close[i];
-      if(i==shift) result=ready?direction:0;
+      AdvanceSupertrend(shift);
+      return gSTDirection;
    }
-   return result;
+   // First call or a history/timeframe jump: seed once from older history.
+   gSTReady=false;gSTUpper=0;gSTLower=0;gSTLine=0;gSTClose=0;
+   gSTDirection=0;gSTPreviousDirection=0;gSTTime=0;gSTPreviousTime=0;
+   int oldest=MathMin(Bars-2,shift+600);
+   for(int i=oldest;i>=shift;i--) AdvanceSupertrend(i);
+   return gSTDirection;
 }
 
 void GetConditions(int shift,bool &bull[],bool &bear[])
@@ -593,6 +614,7 @@ void UpdateClosedTradeResults()
    if(!DrawClosedTradeResults)
    {
       ObjectsDeleteAll(0,PREFIX+"RESULT_");
+      gKnownResultHistory=OrdersHistoryTotal();
       return;
    }
    int maximum=MathMax(1,MathMin(200,MaximumResultBoxes));
@@ -603,6 +625,8 @@ void UpdateClosedTradeResults()
    ArrayInitialize(usedW,0); ArrayInitialize(usedH,0);
    int usedCount=0,drawn=0;
    int total=OrdersHistoryTotal();
+   if(total==gKnownResultHistory) return;
+   gKnownResultHistory=total;
    for(int i=total-1;i>=0 && drawn<maximum;i--)
    {
       if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
@@ -617,14 +641,21 @@ void UpdateClosedTradeResults()
 //+------------------------------------------------------------------+
 void HistoryStats(int &trades,int &wins,int &losses,double &net)
 {
-   trades=0;wins=0;losses=0;net=0;
-   for(int i=OrdersHistoryTotal()-1;i>=0;i--) if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+   static int cachedHistory=-1,cachedTrades=0,cachedWins=0,cachedLosses=0;
+   static double cachedNet=0;
+   int history=OrdersHistoryTotal();
+   if(history!=cachedHistory)
    {
-      if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber) continue;
-      if(OrderType()!=OP_BUY && OrderType()!=OP_SELL) continue;
-      double result=OrderProfit()+OrderSwap()+OrderCommission();
-      trades++; net+=result; if(result>0) wins++; else losses++;
+      cachedHistory=history;cachedTrades=0;cachedWins=0;cachedLosses=0;cachedNet=0;
+      for(int i=history-1;i>=0;i--) if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+      {
+         if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber) continue;
+         if(OrderType()!=OP_BUY && OrderType()!=OP_SELL) continue;
+         double result=OrderProfit()+OrderSwap()+OrderCommission();
+         cachedTrades++; cachedNet+=result; if(result>0) cachedWins++; else cachedLosses++;
+      }
    }
+   trades=cachedTrades;wins=cachedWins;losses=cachedLosses;net=cachedNet;
 }
 
 void DestroyEquityCurve()
@@ -648,6 +679,9 @@ void UpdateEquityCurve()
    int x=MathMax(0,EquityCurveX);
    int y=(int)chartH-MathMax(0,EquityCurveY)-height;
    if(width<220 || y<0) { DestroyEquityCurve(); return; }
+   int historyTotal=OrdersHistoryTotal();
+   if(gEquityCanvasReady && width==gEquityCanvasWidth && height==gEquityCanvasHeight &&
+      (int)chartH==gEquityChartHeight && historyTotal==gEquityHistoryTotal) return;
 
    string canvasName=PREFIX+"EQUITY_CANVAS";
    if(!gEquityCanvasReady || width!=gEquityCanvasWidth || height!=gEquityCanvasHeight)
@@ -671,7 +705,7 @@ void UpdateEquityCurve()
    gEquityCanvas.Line(width-1,0,width-1,height-1,ColorToARGB(C'2,5,12',255));
 
    int count=0; double historyNet=0;
-   for(int i=0;i<OrdersHistoryTotal();i++) if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+   for(int i=0;i<historyTotal;i++) if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
    {
       if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber || (OrderType()!=OP_BUY && OrderType()!=OP_SELL)) continue;
       count++;
@@ -680,7 +714,7 @@ void UpdateEquityCurve()
    double startEquity=(RiskReferenceBalance>0)?RiskReferenceBalance:AccountBalance()-historyNet;
    double curve[]; ArrayResize(curve,count+1); ArrayInitialize(curve,startEquity);
    int n=0; double cumulative=startEquity,minV=startEquity,maxV=startEquity;
-   for(int j=0;j<OrdersHistoryTotal();j++) if(OrderSelect(j,SELECT_BY_POS,MODE_HISTORY))
+   for(int j=0;j<historyTotal;j++) if(OrderSelect(j,SELECT_BY_POS,MODE_HISTORY))
    {
       if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber || (OrderType()!=OP_BUY && OrderType()!=OP_SELL)) continue;
       cumulative+=OrderProfit()+OrderSwap()+OrderCommission();
@@ -701,16 +735,29 @@ void UpdateEquityCurve()
 
    if(n>0)
    {
+      // Catmull-Rom interpolation creates one continuous, smooth equity curve
+      // instead of bars or sharp straight segments between closed trades.
+      int plotWidth=MathMax(1,plotR-plotL);
       int prevX=plotL;
       int prevY=plotB-(int)MathRound((curve[0]-minV)/(maxV-minV)*(plotB-plotT));
-      for(int k=1;k<=n;k++)
+      uint curveColor=ColorToARGB(C'45,105,255',255);
+      for(int pixel=2;pixel<=plotWidth;pixel+=2)
       {
-         int cx=plotL+(plotR-plotL)*k/MathMax(1,n);
-         int cy=plotB-(int)MathRound((curve[k]-minV)/(maxV-minV)*(plotB-plotT));
-         uint lc=(curve[k]>=curve[k-1])?ColorToARGB(C'0,255,170',255):ColorToARGB(C'255,64,96',255);
-         gEquityCanvas.Line(prevX,prevY,cx,cy,lc);
-         gEquityCanvas.Line(prevX,prevY+1,cx,cy+1,lc);
-         prevX=cx; prevY=cy;
+         double u=(double)pixel*n/plotWidth;
+         int index=MathMin(n-1,(int)MathFloor(u));
+         double t=u-index;
+         double p0=curve[MathMax(0,index-1)];
+         double p1=curve[index];
+         double p2=curve[MathMin(n,index+1)];
+         double p3=curve[MathMin(n,index+2)];
+         double t2=t*t,t3=t2*t;
+         double smooth=0.5*((2.0*p1)+(-p0+p2)*t+(2.0*p0-5.0*p1+4.0*p2-p3)*t2+(-p0+3.0*p1-3.0*p2+p3)*t3);
+         smooth=MathMax(minV,MathMin(maxV,smooth));
+         int cx=plotL+pixel;
+         int cy=plotB-(int)MathRound((smooth-minV)/(maxV-minV)*(plotB-plotT));
+         gEquityCanvas.Line(prevX,prevY,cx,cy,curveColor);
+         gEquityCanvas.Line(prevX,prevY+1,cx,cy+1,curveColor);
+         prevX=cx;prevY=cy;
       }
    }
    gEquityCanvas.FontSet("Arial",11,FW_BOLD);
@@ -722,6 +769,8 @@ void UpdateEquityCurve()
    gEquityCanvas.TextOut(7,plotT-3,DoubleToString(maxV,0),text);
    gEquityCanvas.TextOut(7,plotB-8,DoubleToString(minV,0),text);
    gEquityCanvas.Update();
+   gEquityHistoryTotal=historyTotal;
+   gEquityChartHeight=(int)chartH;
 }
 
 void UpdateDashboard()
@@ -788,8 +837,10 @@ int OnInit()
 {
    ArrayInitialize(gBull,false); ArrayInitialize(gBear,false);
    gShowEnabledOnly=(InitialFilterPanelMode==Show_Activated_Filters_Only);
-   ApplyChartTheme();
-   EventSetTimer(1);
+   if(!IsTesting() || IsVisualMode()) ApplyChartTheme();
+   // Timer-driven graphics are disabled in Strategy Tester. Visual tests
+   // update once per bar/trade instead, allowing the Skip button to work.
+   if(!IsTesting()) EventSetTimer(1);
    gLastBar=0;
    return INIT_SUCCEEDED;
 }
@@ -819,19 +870,39 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
    }
    if(id==CHARTEVENT_CHART_CHANGE)
    {
-      UpdateClosedTradeResults();
-      UpdateEquityCurve();
+      // Visual Tester can emit many chart-change events while skipping.
+      // Defer its redraw to the next bar; update immediately only on live charts.
+      if(IsTesting()) gChartLayoutDirty=true;
+      else
+      {
+         gKnownResultHistory=-1;
+         gEquityHistoryTotal=-1;
+         UpdateClosedTradeResults();
+         UpdateEquityCurve();
+      }
    }
 }
 
 void OnTick()
 {
    ManageTrailing();
-   DrawTradeLines();
-   UpdateClosedTradeResults();
    if(Bars<100) return;
+   bool allowGraphics=(!IsTesting() || IsVisualMode());
+   if(allowGraphics && OrdersHistoryTotal()!=gKnownResultHistory)
+   {
+      UpdateClosedTradeResults();
+      UpdateEquityCurve();
+      UpdateDashboard();
+      DrawTradeLines();
+   }
    if(Time[0]==gLastBar) return;
    gLastBar=Time[0];
+   if(gChartLayoutDirty)
+   {
+      gKnownResultHistory=-1;
+      gEquityHistoryTotal=-1;
+      gChartLayoutDirty=false;
+   }
 
    int shift=TradeOnClosedBar?1:0;
    bool previousBull[11]={false,false,false,false,false,false,false,false,false,false,false};
@@ -857,6 +928,12 @@ void OnTick()
       if(enterLong) OpenPosition(OP_BUY);
       else if(enterShort) OpenPosition(OP_SELL);
    }
-   UpdateDashboard();
+   if(allowGraphics)
+   {
+      DrawTradeLines();
+      UpdateClosedTradeResults();
+      UpdateDashboard();
+      UpdateEquityCurve();
+   }
 }
 //+------------------------------------------------------------------+
