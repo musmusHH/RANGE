@@ -31,12 +31,6 @@ input double TakeProfitPoints  = 5000.0;
 input double RiskPercent       = 0.5;
 input double RiskReferenceBalance = 0.0; // 0 = current account balance
 
-//--- Maximum estimated account-currency loss at the ATR stop. This is money
-//--- risk (for example $5.00 on a USD account), not a $5 gold price movement.
-input bool   EnableMaxATRSLMoneyRiskFilter = true;
-input double MaximumATRSLRiskMoney         = 5.0;
-input double EstimatedRoundTripCostsMoney  = 0.20; // commission/swap allowance
-
 //--- Point trailing stop (requested defaults)
 input bool   EnableTrailingStop = true;
 input double TrailingStartPoints = 700.0;
@@ -419,19 +413,6 @@ bool OpenPosition(int type)
    double entry=(type==OP_BUY)?Ask:Bid;
    double atr=iATR(NULL,0,MathMax(1,ATRLength),1);
    double atrSLDistance=atr*MathMax(0.1,StopLossATR);
-   double tickSize=MarketInfo(Symbol(),MODE_TICKSIZE);
-   double tickValue=MarketInfo(Symbol(),MODE_TICKVALUE);
-   if(tickSize<=0.0) tickSize=Point;
-   double atrSLMoney=(tickValue>0.0)?(atrSLDistance/tickSize)*tickValue*lots:0.0;
-   double estimatedRiskMoney=atrSLMoney+MathMax(0.0,EstimatedRoundTripCostsMoney);
-   if(EnableMaxATRSLMoneyRiskFilter && MaximumATRSLRiskMoney>0.0 &&
-      (tickValue<=0.0 || estimatedRiskMoney>MaximumATRSLRiskMoney))
-   {
-      if(tickValue<=0.0) gLastAction="IGNORED: NO TICK VALUE";
-      else gLastAction="IGNORED: ATR RISK $"+DoubleToString(estimatedRiskMoney,2)+" > $"+DoubleToString(MaximumATRSLRiskMoney,2);
-      Print("Signal Forge signal ignored. ",gLastAction);
-      return false;
-   }
    double slDistance=(StopLossMode==SL_By_Risk_Percent)?RiskStopDistance(lots):atrSLDistance;
    double tpDistance=(TakeProfitMode==TP_By_Points)?MathMax(Point,TakeProfitPoints*Point):atr*MathMax(0.1,TakeProfitATR);
    double minimum=(MarketInfo(Symbol(),MODE_STOPLEVEL)+2)*Point;
