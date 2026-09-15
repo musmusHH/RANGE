@@ -245,14 +245,16 @@ void DrawPerFilterButton(int index,EA_CORNER pos,int panelX,int panelY,int panel
    ObjectSetInteger(0,name,OBJPROP_CORNER,CornerValue(pos));
    ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
    ObjectSetInteger(0,name,OBJPROP_XSIZE,width);ObjectSetInteger(0,name,OBJPROP_YSIZE,height);
-   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,gDrawFilter[index]?C'0,105,80':C'75,28,43');
+   // Native MT4 buttons are raised while STATE=false. Vivid blue means the
+   // real indicator plot is shown; solid gold means it is hidden.
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,gDrawFilter[index]?C'0,125,215':C'170,100,0');
    ObjectSetInteger(0,name,OBJPROP_COLOR,C'255,255,255');
-   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,gDrawFilter[index]?C'0,255,170':C'255,90,115');
-   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,MathMax(6,DashboardFontSize-2));
-   ObjectSetString(0,name,OBJPROP_FONT,"Arial Bold");
-   ObjectSetString(0,name,OBJPROP_TEXT,gDrawFilter[index]?"DRAW ON":"DRAW OFF");
-   ObjectSetInteger(0,name,OBJPROP_STATE,false);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);ObjectSetInteger(0,name,OBJPROP_ZORDER,110);
+   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,gDrawFilter[index]?C'105,215,255':C'255,205,70');
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,MathMax(7,DashboardFontSize-1));
+   ObjectSetString(0,name,OBJPROP_FONT,"Arial Black");
+   ObjectSetString(0,name,OBJPROP_TEXT,gDrawFilter[index]?"SHOWN":"HIDDEN");
+   ObjectSetInteger(0,name,OBJPROP_STATE,false);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);ObjectSetInteger(0,name,OBJPROP_ZORDER,110);
 }
 
 void DeleteSignalRow(string id)
@@ -412,7 +414,9 @@ void CreateSignalOrbResource(bool buy)
       pattern[0]="01111";pattern[1]="10000";pattern[2]="10000";pattern[3]="01110";
       pattern[4]="00001";pattern[5]="00001";pattern[6]="11110";
    }
-   int scale=MathMax(1,MathMin(3,SignalLetterFontSize/4));
+   // A two-pixel raster stroke keeps the letter crisp and leaves balanced
+   // space inside the circle; the earlier three-pixel glyph looked distorted.
+   int scale=MathMax(1,MathMin(3,SignalLetterFontSize/6));
    int startX=(side-5*scale)/2,startY=(side-7*scale)/2;
    uint white=ColorToARGB(C'255,255,255',255);
    for(int row=0;row<7;row++)for(int col=0;col<5;col++)if(StringSubstr(pattern[row],col,1)=="1")
@@ -441,7 +445,9 @@ void DrawSignalOrb(bool buy,int shift)
    ObjectMove(0,bitmap,0,when,price);
    ObjectSetString(0,bitmap,OBJPROP_BMPFILE,0,buy?gBuyOrbResource:gSellOrbResource);
    ObjectSetInteger(0,bitmap,OBJPROP_ANCHOR,ANCHOR_CENTER);
-   ObjectSetInteger(0,bitmap,OBJPROP_BACK,false);ObjectSetInteger(0,bitmap,OBJPROP_ZORDER,52);
+   // Signal bitmap and connector remain behind every foreground dashboard and
+   // the opaque equity canvas, while still visible in the chart area.
+   ObjectSetInteger(0,bitmap,OBJPROP_BACK,true);ObjectSetInteger(0,bitmap,OBJPROP_ZORDER,0);
    ObjectSetInteger(0,bitmap,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,bitmap,OBJPROP_HIDDEN,true);
    double candlePoint=buy?Low[shift]:High[shift];
    if(ObjectFind(0,link)<0)ObjectCreate(0,link,OBJ_TREND,0,when,candlePoint,when,price);
