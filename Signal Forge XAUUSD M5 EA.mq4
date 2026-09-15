@@ -96,6 +96,7 @@ input bool DrawEntrySLTPLines = true;
 input bool DrawClosedTradeResults = true;
 input int  MaximumResultBoxes = 50;
 input int  ResultBoxPaddingPixels = 8;
+input int  ResultCardCandleGapPixels = 20;
 input bool MoveResultCardsEveryTick = true;
 input int  ResultMovementRefreshMs = 100; // fallback when every-tick mode is off
 
@@ -544,6 +545,29 @@ bool PixelBoxesOverlap(int x1,int y1,int w1,int h1,int x2,int y2,int w2,int h2)
    return (x1<x2+w2+3 && x1+w1+3>x2 && y1<y2+h2+3 && y1+h1+3>y2);
 }
 
+void HideResultCardOffscreen(string base)
+{
+   string names[4]={base+"MAIN",base+"SUB",base+"TITLE",base+"DETAIL"};
+   for(int i=0;i<4;i++) if(ObjectFind(0,names[i])>=0)
+      ObjectSetInteger(0,names[i],OBJPROP_XDISTANCE,100000);
+   ObjectDelete(0,base+"LINK_V");ObjectDelete(0,base+"LINK_H");
+}
+
+void DottedResultLink(string name,datetime t1,double p1,datetime t2,double p2,color c)
+{
+   EnsureResultCardObject(name,OBJ_TREND);
+   if(ObjectFind(0,name)<0) ObjectCreate(0,name,OBJ_TREND,0,t1,p1,t2,p2);
+   ObjectMove(0,name,0,t1,p1);ObjectMove(0,name,1,t2,p2);
+   ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,false);
+   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_DOT);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,c);
+   ObjectSetInteger(0,name,OBJPROP_BACK,true);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,0);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+}
+
 void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int &usedCount)
 {
    int ticket=OrderTicket();
@@ -558,8 +582,9 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    int anchorX=0,anchorY=0;
    if(!ChartTimePriceToXY(0,0,closeTime,OrderClosePrice(),anchorX,anchorY))
    {
-      // Keep an already-created card instead of deleting/recreating it. This
-      // preserves its layer beneath the dashboard when it returns on-screen.
+      // Preserve object creation order but move off-chart cards out of view;
+      // otherwise they remain frozen at the edge when the chart scrolls.
+      HideResultCardOffscreen(base);
       return;
    }
 
@@ -585,29 +610,56 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    long chartWidth=0,chartHeight=0;
    ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartWidth);
    ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartHeight);
-   int left=anchorX+10;
-   if(left+width>(int)chartWidth-8) left=anchorX-width-10;
+   // Option 2: float the card above the closing candle and offset it right.
+   int closeShift=iBarShift(Symbol(),Period(),closeTime,false);
+   int highX=anchorX,highY=anchorY;
+   if(closeShift>=0) ChartTimePriceToXY(0,0,closeTime,High[closeShift],highX,highY);
+   int candleGap=MathMax(8,ResultCardCandleGapPixels);
+   int left=anchorX+16;
+   if(left+width>(int)chartWidth-8) left=anchorX-width-16;
    left=MathMax(8,MathMin(left,(int)chartWidth-width-8));
-   int top=MathMax(8,MathMin(anchorY-height/2,(int)chartHeight-height-8));
-   // Collision avoidance: move a card below an existing card, or above it
-   // near the lower edge. Text and both raised rows always move together.
+   int top=MathMax(8,MathMin(highY-candleGap-height,(int)chartHeight-height-8));
+
+   // Collision avoidance stacks conflicting cards upward only, ensuring that
+   // no result card is moved back down over a candle.
    for(int pass=0;pass<100;pass++)
    {
       bool moved=false;
       for(int i=0;i<usedCount;i++)
       {
          if(!PixelBoxesOverlap(left,top,width,height,usedX[i],usedY[i],usedW[i],usedH[i])) continue;
-         int below=usedY[i]+usedH[i]+5;
-         if(below+height<=(int)chartHeight-8) top=below;
-         else top=MathMax(8,usedY[i]-height-5);
+         int above=usedY[i]-height-5;
+         if(above>=8) top=above;
+         else
+         {
+            int right=usedX[i]+usedW[i]+5;
+            int leftSide=usedX[i]-width-5;
+            if(right+width<=(int)chartWidth-8) left=right;
+            else if(leftSide>=8) left=leftSide;
+            else top=8;
+         }
          moved=true;
          break;
       }
       if(!moved) break;
    }
+
    color mainBg=won?C'0,82,185':C'145,20,48';
    color subBg=won?C'0,124,230':C'210,32,68';
    color border=won?C'90,205,255':C'255,115,135';
+   color linkColor=won?C'55,205,255':C'255,90,115';
+
+   // Dotted L connector: exact close -> vertical knee -> nearest card edge.
+   int kneeY=top+height/2;
+   int edgeX=(left>=anchorX)?left:left+width;
+   int kneeSub=0,edgeSub=0;datetime kneeTime=0,edgeTime=0;double kneePrice=0,edgePrice=0;
+   if(ChartXYToTimePrice(0,anchorX,kneeY,kneeSub,kneeTime,kneePrice) &&
+      ChartXYToTimePrice(0,edgeX,kneeY,edgeSub,edgeTime,edgePrice))
+   {
+      DottedResultLink(base+"LINK_V",closeTime,OrderClosePrice(),kneeTime,kneePrice,linkColor);
+      DottedResultLink(base+"LINK_H",kneeTime,kneePrice,edgeTime,edgePrice,linkColor);
+   }
+   else {ObjectDelete(0,base+"LINK_V");ObjectDelete(0,base+"LINK_H");}
    ResultCardRow(base+"MAIN",base+"TITLE",left,top,width,mainHeight,headline,mainBg,border,mainFont,padding);
    ResultCardRow(base+"SUB",base+"DETAIL",left,top+mainHeight,width,subHeight,detail,subBg,border,subFont,padding);
 
