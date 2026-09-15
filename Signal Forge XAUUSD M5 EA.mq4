@@ -87,6 +87,7 @@ input int  AccountPanelY = 10;
 input EA_CORNER SignalPanelPosition = EA_Top_Right;
 input EA_CORNER PerformancePanelPosition = EA_Bottom_Right;
 input FILTER_PANEL_MODE InitialFilterPanelMode = Show_Activated_Filters_Only;
+input bool DrawEnabledFiltersOnChartByDefault = false;
 input int DashboardFontSize = 9;
 input bool ShowEquityCurve = true;
 input int  EquityCurveX = 10;
@@ -106,6 +107,7 @@ bool gBull[11],gBear[11];
 bool gLongSignal=false,gShortSignal=false;
 string gLastAction="EA INITIALIZED";
 bool gShowEnabledOnly=false;
+bool gDrawFilter[11];
 CCanvas gEquityCanvas;
 bool gEquityCanvasReady=false;
 int gEquityCanvasWidth=0,gEquityCanvasHeight=0;
@@ -223,6 +225,28 @@ void DrawFilterToggle(EA_CORNER pos,int panelX,int panelY,int panelW,int panelH,
    ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_HIDDEN,true);
 }
 
+void DrawPerFilterButton(int index,EA_CORNER pos,int panelX,int panelY,int panelW,int panelH,
+                         int left,int top,int width,int height)
+{
+   string name=PREFIX+"FILTER_DRAW_"+IntegerToString(index);
+   bool right=(pos==EA_Top_Right || pos==EA_Bottom_Right);
+   bool bottom=(pos==EA_Bottom_Right || pos==EA_Bottom_Left);
+   int x=right?panelX+panelW-left:panelX+left;
+   int y=bottom?panelY+panelH-top:panelY+top;
+   if(ObjectFind(0,name)<0) ObjectCreate(0,name,OBJ_BUTTON,0,0,0);
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CornerValue(pos));
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,width);ObjectSetInteger(0,name,OBJPROP_YSIZE,height);
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,gDrawFilter[index]?C'0,105,80':C'75,28,43');
+   ObjectSetInteger(0,name,OBJPROP_COLOR,C'255,255,255');
+   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,gDrawFilter[index]?C'0,255,170':C'255,90,115');
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,MathMax(6,DashboardFontSize-2));
+   ObjectSetString(0,name,OBJPROP_FONT,"Arial Bold");
+   ObjectSetString(0,name,OBJPROP_TEXT,gDrawFilter[index]?"DRAW ON":"DRAW OFF");
+   ObjectSetInteger(0,name,OBJPROP_STATE,false);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);ObjectSetInteger(0,name,OBJPROP_ZORDER,110);
+}
+
 void DeleteSignalRow(string id)
 {
    string parts[3]={"N","S","E"};
@@ -231,6 +255,48 @@ void DeleteSignalRow(string id)
       ObjectDelete(0,PREFIX+"SIG_C_"+parts[i]+id);
       ObjectDelete(0,PREFIX+"SIG_T_"+parts[i]+id);
    }
+   ObjectDelete(0,PREFIX+"FILTER_DRAW_"+id);
+}
+
+void UpdateFilterChartDrawings()
+{
+   string names[11]={"SMA","RSI","MACD","SUPERTREND","STOCH","BOLLINGER","EMA","AO","SAR","CCI","ADX"};
+   double atr=iATR(NULL,0,MathMax(1,ATRLength),1);int slot=0;
+   for(int i=0;i<11;i++)
+   {
+      string object=PREFIX+"FILTER_CHART_"+IntegerToString(i);
+      if(!gDrawFilter[i]){ObjectDelete(0,object);continue;}
+      double price=High[1]+atr*(0.45+slot*0.18);slot++;
+      if(ObjectFind(0,object)<0) ObjectCreate(0,object,OBJ_TEXT,0,Time[1],price);
+      ObjectMove(0,object,0,Time[1],price);
+      ObjectSetString(0,object,OBJPROP_TEXT,names[i]+" "+StatusText(gBull[i],gBear[i]));
+      ObjectSetString(0,object,OBJPROP_FONT,"Arial Bold");ObjectSetInteger(0,object,OBJPROP_FONTSIZE,8);
+      ObjectSetInteger(0,object,OBJPROP_COLOR,StatusColor(gBull[i],gBear[i]));
+      ObjectSetInteger(0,object,OBJPROP_ANCHOR,ANCHOR_CENTER);ObjectSetInteger(0,object,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,object,OBJPROP_HIDDEN,true);
+   }
+}
+
+void DrawSignalOrb(bool buy,int shift)
+{
+   datetime when=Time[shift];double atr=iATR(NULL,0,MathMax(1,ATRLength),shift);
+   double price=buy?Low[shift]-atr*0.65:High[shift]+atr*0.65;
+   string id=IntegerToString((int)when)+(buy?"_B":"_S");string base=PREFIX+"SIGNAL_ORB_"+id;
+   color dark=buy?C'0,82,66':C'110,18,38';color vivid=buy?C'0,255,170':C'255,64,96';
+   string outer=base+"_OUT",inner=base+"_IN",letter=base+"_TXT",link=base+"_LINK";
+   if(ObjectFind(0,outer)<0)ObjectCreate(0,outer,OBJ_ARROW,0,when,price);
+   if(ObjectFind(0,inner)<0)ObjectCreate(0,inner,OBJ_ARROW,0,when,price);
+   ObjectMove(0,outer,0,when,price);ObjectMove(0,inner,0,when,price);
+   ObjectSetInteger(0,outer,OBJPROP_ARROWCODE,159);ObjectSetInteger(0,outer,OBJPROP_COLOR,dark);ObjectSetInteger(0,outer,OBJPROP_WIDTH,5);
+   ObjectSetInteger(0,inner,OBJPROP_ARROWCODE,159);ObjectSetInteger(0,inner,OBJPROP_COLOR,vivid);ObjectSetInteger(0,inner,OBJPROP_WIDTH,3);
+   if(ObjectFind(0,letter)<0)ObjectCreate(0,letter,OBJ_TEXT,0,when,price);
+   ObjectMove(0,letter,0,when,price);ObjectSetString(0,letter,OBJPROP_TEXT,buy?"B":"S");
+   ObjectSetString(0,letter,OBJPROP_FONT,"Arial Black");ObjectSetInteger(0,letter,OBJPROP_FONTSIZE,9);
+   ObjectSetInteger(0,letter,OBJPROP_COLOR,C'255,255,255');ObjectSetInteger(0,letter,OBJPROP_ANCHOR,ANCHOR_CENTER);
+   double candlePoint=buy?Low[shift]:High[shift];
+   if(ObjectFind(0,link)<0)ObjectCreate(0,link,OBJ_TREND,0,when,candlePoint,when,price);
+   ObjectMove(0,link,0,when,candlePoint);ObjectMove(0,link,1,when,price);
+   ObjectSetInteger(0,link,OBJPROP_RAY_RIGHT,false);ObjectSetInteger(0,link,OBJPROP_STYLE,STYLE_DOT);ObjectSetInteger(0,link,OBJPROP_COLOR,vivid);
 }
 
 color StatusColor(bool bull,bool bear)
@@ -1133,9 +1199,10 @@ void UpdateDashboard()
    DrawPanel("SIG",SignalPanelPosition,x,y,w,h);
    DrawCell("SIG","TITLE",SignalPanelPosition,x,y,w,h,6,6,270,28,"SIGNAL FORGE EA | "+Symbol(),C'255,255,255',C'82,55,210',fs+1);
    DrawFilterToggle(SignalPanelPosition,x,y,w,h,276,6,108,28);
-   DrawCell("SIG","H0",SignalPanelPosition,x,y,w,h,6,36,150,22,"INDICATOR",C'120,210,255',C'28,48,88',fs);
-   DrawCell("SIG","H1",SignalPanelPosition,x,y,w,h,156,36,130,22,"STATUS",C'120,210,255',C'28,48,88',fs);
-   DrawCell("SIG","H2",SignalPanelPosition,x,y,w,h,286,36,98,22,"FILTER",C'120,210,255',C'28,48,88',fs);
+   DrawCell("SIG","H0",SignalPanelPosition,x,y,w,h,6,36,120,22,"INDICATOR",C'120,210,255',C'28,48,88',fs);
+   DrawCell("SIG","H1",SignalPanelPosition,x,y,w,h,126,36,100,22,"STATUS",C'120,210,255',C'28,48,88',fs);
+   DrawCell("SIG","H2",SignalPanelPosition,x,y,w,h,226,36,70,22,"ACTIVE",C'120,210,255',C'28,48,88',fs-1);
+   DrawCell("SIG","H3",SignalPanelPosition,x,y,w,h,296,36,88,22,"CHART",C'120,210,255',C'28,48,88',fs-1);
    int slot=0;
    for(int i=0;i<11;i++)
    {
@@ -1144,9 +1211,10 @@ void UpdateDashboard()
       int top=60+slot*22; slot++;
       color sc=StatusColor(gBull[i],gBear[i]);
       color sb=gBull[i]?C'0,72,58':(gBear[i]?C'92,18,36':C'65,55,20');
-      DrawCell("SIG","N"+id,SignalPanelPosition,x,y,w,h,6,top,150,21,names[i],C'235,240,255',C'22,30,48',fs);
-      DrawCell("SIG","S"+id,SignalPanelPosition,x,y,w,h,156,top,130,21,StatusText(gBull[i],gBear[i]),sc,sb,fs);
-      DrawCell("SIG","E"+id,SignalPanelPosition,x,y,w,h,286,top,98,21,enabled[i]?"ON":"OFF",enabled[i]?C'0,255,170':C'255,64,96',enabled[i]?C'0,72,58':C'92,18,36',fs);
+      DrawCell("SIG","N"+id,SignalPanelPosition,x,y,w,h,6,top,120,21,names[i],C'235,240,255',C'22,30,48',fs-1);
+      DrawCell("SIG","S"+id,SignalPanelPosition,x,y,w,h,126,top,100,21,StatusText(gBull[i],gBear[i]),sc,sb,fs-1);
+      DrawCell("SIG","E"+id,SignalPanelPosition,x,y,w,h,226,top,70,21,enabled[i]?"ON":"OFF",enabled[i]?C'0,255,170':C'255,64,96',enabled[i]?C'0,72,58':C'92,18,36',fs-1);
+      DrawPerFilterButton(i,SignalPanelPosition,x,y,w,h,296,top,88,21);
    }
    string signal=gLongSignal?"LONG":(gShortSignal?"SHORT":"NEUTRAL");
    color sigc=gLongSignal?C'0,255,170':(gShortSignal?C'255,64,96':C'255,214,64');
@@ -1181,7 +1249,13 @@ void UpdateDashboard()
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   ArrayInitialize(gBull,false); ArrayInitialize(gBear,false);
+   ArrayInitialize(gBull,false);ArrayInitialize(gBear,false);ArrayInitialize(gDrawFilter,false);
+   if(DrawEnabledFiltersOnChartByDefault)
+   {
+      gDrawFilter[0]=EnableSMA;gDrawFilter[1]=EnableRSI;gDrawFilter[2]=EnableMACD;gDrawFilter[3]=EnableSupertrend;
+      gDrawFilter[4]=EnableStochastic;gDrawFilter[5]=EnableBollinger;gDrawFilter[6]=EnableEMA;gDrawFilter[7]=EnableAO;
+      gDrawFilter[8]=EnableSAR;gDrawFilter[9]=EnableCCI;gDrawFilter[10]=EnableADX;
+   }
    gShowEnabledOnly=(InitialFilterPanelMode==Show_Activated_Filters_Only);
    if(!IsTesting() || IsVisualMode()) ApplyChartTheme();
    // Timer-driven graphics are disabled in Strategy Tester. Visual tests
@@ -1216,6 +1290,18 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
       gShowEnabledOnly=!gShowEnabledOnly;
       ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_STATE,false);
       UpdateDashboard();
+   }
+   string drawPrefix=PREFIX+"FILTER_DRAW_";
+   if(id==CHARTEVENT_OBJECT_CLICK && StringFind(sparam,drawPrefix,0)==0)
+   {
+      int index=(int)StringToInteger(StringSubstr(sparam,StringLen(drawPrefix)));
+      if(index>=0 && index<11)
+      {
+         gDrawFilter[index]=!gDrawFilter[index];
+         ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+         UpdateFilterChartDrawings();
+         UpdateDashboard();
+      }
    }
    if(id==CHARTEVENT_CHART_CHANGE)
    {
@@ -1288,6 +1374,12 @@ void OnTick()
    CombinedSignal(previousBull,previousBear,previousLong,previousShort);
    bool enterLong=gLongSignal && !previousLong;
    bool enterShort=gShortSignal && !previousShort;
+   if(allowGraphics)
+   {
+      UpdateFilterChartDrawings();
+      if(enterLong) DrawSignalOrb(true,shift);
+      if(enterShort) DrawSignalOrb(false,shift);
+   }
 
    int currentType;int ticket=ActiveTicket(currentType);
    if(CloseOnOppositeSignal && ticket>=0)
