@@ -547,7 +547,10 @@ bool PixelBoxesOverlap(int x1,int y1,int w1,int h1,int x2,int y2,int w2,int h2)
 
 void HideResultCardOffscreen(string base)
 {
-   string names[4]={base+"MAIN",base+"SUB",base+"TITLE",base+"DETAIL"};
+   // MQL4 only accepts compile-time constants in aggregate initializers.
+   string names[4];
+   names[0]=base+"MAIN";names[1]=base+"SUB";
+   names[2]=base+"TITLE";names[3]=base+"DETAIL";
    for(int i=0;i<4;i++) if(ObjectFind(0,names[i])>=0)
       ObjectSetInteger(0,names[i],OBJPROP_XDISTANCE,100000);
    ObjectDelete(0,base+"LINK_V");ObjectDelete(0,base+"LINK_H");
