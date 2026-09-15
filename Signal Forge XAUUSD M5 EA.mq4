@@ -545,15 +545,21 @@ bool PixelBoxesOverlap(int x1,int y1,int w1,int h1,int x2,int y2,int w2,int h2)
    return (x1<x2+w2+3 && x1+w1+3>x2 && y1<y2+h2+3 && y1+h1+3>y2);
 }
 
+void MoveResultObjectOffscreen(string name)
+{
+   if(ObjectFind(0,name)>=0)
+      ObjectSetInteger(0,name,OBJPROP_XDISTANCE,100000);
+}
+
 void HideResultCardOffscreen(string base)
 {
-   // MQL4 only accepts compile-time constants in aggregate initializers.
-   string names[4];
-   names[0]=base+"MAIN";names[1]=base+"SUB";
-   names[2]=base+"TITLE";names[3]=base+"DETAIL";
-   for(int i=0;i<4;i++) if(ObjectFind(0,names[i])>=0)
-      ObjectSetInteger(0,names[i],OBJPROP_XDISTANCE,100000);
-   ObjectDelete(0,base+"LINK_V");ObjectDelete(0,base+"LINK_H");
+   // Use direct runtime calls—no aggregate string initializer is involved.
+   MoveResultObjectOffscreen(base+"MAIN");
+   MoveResultObjectOffscreen(base+"SUB");
+   MoveResultObjectOffscreen(base+"TITLE");
+   MoveResultObjectOffscreen(base+"DETAIL");
+   ObjectDelete(0,base+"LINK_V");
+   ObjectDelete(0,base+"LINK_H");
 }
 
 void DottedResultLink(string name,datetime t1,double p1,datetime t2,double p2,color c)
