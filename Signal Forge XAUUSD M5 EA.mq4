@@ -577,6 +577,28 @@ void DottedResultLink(string name,datetime t1,double p1,datetime t2,double p2,co
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
 }
 
+int ResultCandleBoundaryY(int cardLeft,int cardWidth,int closeShift,bool above,int fallbackY)
+{
+   int sub1=0,sub2=0;datetime time1=0,time2=0;double price1=0,price2=0;
+   if(!ChartXYToTimePrice(0,cardLeft,fallbackY,sub1,time1,price1) ||
+      !ChartXYToTimePrice(0,cardLeft+cardWidth,fallbackY,sub2,time2,price2)) return fallbackY;
+   int shift1=iBarShift(Symbol(),Period(),time1,false);
+   int shift2=iBarShift(Symbol(),Period(),time2,false);
+   if(shift1<0 || shift2<0) return fallbackY;
+   int first=MathMax(0,MathMin(shift1,shift2)-1);
+   int last=MathMin(Bars-1,MathMax(shift1,shift2)+1);
+   first=MathMin(first,closeShift);last=MathMax(last,closeShift);
+   double boundary=above?High[first]:Low[first];int boundaryShift=first;
+   for(int i=first+1;i<=last;i++)
+   {
+      if(above && High[i]>boundary){boundary=High[i];boundaryShift=i;}
+      if(!above && Low[i]<boundary){boundary=Low[i];boundaryShift=i;}
+   }
+   int px=0,py=fallbackY;
+   if(!ChartTimePriceToXY(0,0,Time[boundaryShift],boundary,px,py)) return fallbackY;
+   return py;
+}
+
 void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int &usedCount)
 {
    int ticket=OrderTicket();
@@ -619,39 +641,50 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    long chartWidth=0,chartHeight=0;
    ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartWidth);
    ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartHeight);
-   // Option 2: float the card above the closing candle and offset it right.
+   // BUY results stay above all candles covered by the card. SELL results
+   // stay below them. The boundary is recalculated every tick while scrolling.
+   bool placeAbove=(OrderType()==OP_BUY);
    int closeShift=iBarShift(Symbol(),Period(),closeTime,false);
-   int highX=anchorX,highY=anchorY;
-   if(closeShift>=0) ChartTimePriceToXY(0,0,closeTime,High[closeShift],highX,highY);
-   int candleGap=MathMax(8,ResultCardCandleGapPixels);
+   if(closeShift<0) closeShift=0;
    int left=anchorX+16;
    if(left+width>(int)chartWidth-8) left=anchorX-width-16;
    left=MathMax(8,MathMin(left,(int)chartWidth-width-8));
-   int top=MathMax(8,MathMin(highY-candleGap-height,(int)chartHeight-height-8));
+   int associatedX=anchorX,associatedY=anchorY;
+   double associatedBoundary=placeAbove?High[closeShift]:Low[closeShift];
+   ChartTimePriceToXY(0,0,Time[closeShift],associatedBoundary,associatedX,associatedY);
+   int candleBoundaryY=ResultCandleBoundaryY(left,width,closeShift,placeAbove,associatedY);
+   int candleGap=MathMax(8,ResultCardCandleGapPixels);
+   int top=placeAbove?(candleBoundaryY-candleGap-height):(candleBoundaryY+candleGap);
+   top=MathMax(8,MathMin(top,(int)chartHeight-height-8));
 
-   // Collision avoidance stacks conflicting cards upward only, ensuring that
-   // no result card is moved back down over a candle.
+   // BUY cards stack farther upward; SELL cards stack farther downward. If the
+   // chart edge prevents that movement, use a neighboring horizontal slot.
    for(int pass=0;pass<100;pass++)
    {
       bool moved=false;
       for(int i=0;i<usedCount;i++)
       {
          if(!PixelBoxesOverlap(left,top,width,height,usedX[i],usedY[i],usedW[i],usedH[i])) continue;
-         int above=usedY[i]-height-5;
-         if(above>=8) top=above;
+         int candidate=placeAbove?(usedY[i]-height-5):(usedY[i]+usedH[i]+5);
+         if(candidate>=8 && candidate+height<=(int)chartHeight-8) top=candidate;
          else
          {
             int right=usedX[i]+usedW[i]+5;
             int leftSide=usedX[i]-width-5;
             if(right+width<=(int)chartWidth-8) left=right;
             else if(leftSide>=8) left=leftSide;
-            else top=8;
+            else top=placeAbove?8:(int)chartHeight-height-8;
          }
          moved=true;
          break;
       }
       if(!moved) break;
    }
+   // Recheck the candle envelope after any horizontal collision shift.
+   candleBoundaryY=ResultCandleBoundaryY(left,width,closeShift,placeAbove,associatedY);
+   int safeTop=placeAbove?(candleBoundaryY-candleGap-height):(candleBoundaryY+candleGap);
+   top=placeAbove?MathMin(top,safeTop):MathMax(top,safeTop);
+   top=MathMax(8,MathMin(top,(int)chartHeight-height-8));
 
    color mainBg=won?C'0,82,185':C'145,20,48';
    color subBg=won?C'0,124,230':C'210,32,68';
