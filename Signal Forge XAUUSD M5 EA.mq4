@@ -91,6 +91,8 @@ input bool DrawEnabledFiltersOnChartByDefault = false;
 input int  FilterDrawingBars = 150;
 input bool DrawBuySellSignalOrbs = true;
 input int  SignalHistoryBars = 300;
+input int  SignalCircleSize = 16;
+input int  SignalLetterFontSize = 12;
 input int DashboardFontSize = 9;
 input bool ShowEquityCurve = true;
 input int  EquityCurveX = 10;
@@ -294,7 +296,8 @@ void PlotFilterSegment(int filter,int line,int shift,double olderValue,double ne
    if(ObjectFind(0,name)<0)ObjectCreate(0,name,OBJ_TREND,0,Time[shift+1],olderValue,Time[shift],newerValue);
    ObjectMove(0,name,0,Time[shift+1],olderValue);ObjectMove(0,name,1,Time[shift],newerValue);
    ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,false);ObjectSetInteger(0,name,OBJPROP_COLOR,c);
-   ObjectSetInteger(0,name,OBJPROP_WIDTH,width);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,width);ObjectSetInteger(0,name,OBJPROP_BACK,true);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,1);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
 }
 
 double OscillatorValue(int filter,int line,int shift)
@@ -353,7 +356,7 @@ void UpdateFilterChartDrawings()
             string name=PREFIX+"FILTER_PLOT_8_0_"+IntegerToString(s);double sar=iSAR(NULL,0,SARStep,SARMaximum,s);
             if(ObjectFind(0,name)<0)ObjectCreate(0,name,OBJ_ARROW,0,Time[s],sar);
             ObjectMove(0,name,0,Time[s],sar);ObjectSetInteger(0,name,OBJPROP_ARROWCODE,159);ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
-            ObjectSetInteger(0,name,OBJPROP_COLOR,Close[s]>sar?C'0,255,170':C'255,64,96');
+            ObjectSetInteger(0,name,OBJPROP_COLOR,Close[s]>sar?C'0,255,170':C'255,64,96');ObjectSetInteger(0,name,OBJPROP_BACK,true);
          }
       }
       else
@@ -387,16 +390,23 @@ void DrawSignalOrb(bool buy,int shift)
    if(ObjectFind(0,outer)<0)ObjectCreate(0,outer,OBJ_ARROW,0,when,price);
    if(ObjectFind(0,inner)<0)ObjectCreate(0,inner,OBJ_ARROW,0,when,price);
    ObjectMove(0,outer,0,when,price);ObjectMove(0,inner,0,when,price);
-   ObjectSetInteger(0,outer,OBJPROP_ARROWCODE,159);ObjectSetInteger(0,outer,OBJPROP_COLOR,dark);ObjectSetInteger(0,outer,OBJPROP_WIDTH,5);
-   ObjectSetInteger(0,inner,OBJPROP_ARROWCODE,159);ObjectSetInteger(0,inner,OBJPROP_COLOR,vivid);ObjectSetInteger(0,inner,OBJPROP_WIDTH,3);
+   int circleSize=MathMax(8,SignalCircleSize);
+   ObjectSetInteger(0,outer,OBJPROP_ARROWCODE,159);ObjectSetInteger(0,outer,OBJPROP_COLOR,dark);ObjectSetInteger(0,outer,OBJPROP_WIDTH,circleSize);
+   ObjectSetInteger(0,outer,OBJPROP_BACK,false);ObjectSetInteger(0,outer,OBJPROP_ZORDER,50);
+   ObjectSetInteger(0,inner,OBJPROP_ARROWCODE,159);ObjectSetInteger(0,inner,OBJPROP_COLOR,vivid);ObjectSetInteger(0,inner,OBJPROP_WIDTH,MathMax(6,circleSize-3));
+   ObjectSetInteger(0,inner,OBJPROP_BACK,false);ObjectSetInteger(0,inner,OBJPROP_ZORDER,51);
    if(ObjectFind(0,letter)<0)ObjectCreate(0,letter,OBJ_TEXT,0,when,price);
    ObjectMove(0,letter,0,when,price);ObjectSetString(0,letter,OBJPROP_TEXT,buy?"B":"S");
-   ObjectSetString(0,letter,OBJPROP_FONT,"Arial Black");ObjectSetInteger(0,letter,OBJPROP_FONTSIZE,9);
+   ObjectSetString(0,letter,OBJPROP_FONT,"Arial Black");ObjectSetInteger(0,letter,OBJPROP_FONTSIZE,MathMax(8,SignalLetterFontSize));
    ObjectSetInteger(0,letter,OBJPROP_COLOR,C'255,255,255');ObjectSetInteger(0,letter,OBJPROP_ANCHOR,ANCHOR_CENTER);
+   ObjectSetInteger(0,letter,OBJPROP_BACK,false);ObjectSetInteger(0,letter,OBJPROP_ZORDER,52);
+   ObjectSetInteger(0,outer,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,inner,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,letter,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,outer,OBJPROP_HIDDEN,true);ObjectSetInteger(0,inner,OBJPROP_HIDDEN,true);ObjectSetInteger(0,letter,OBJPROP_HIDDEN,true);
    double candlePoint=buy?Low[shift]:High[shift];
    if(ObjectFind(0,link)<0)ObjectCreate(0,link,OBJ_TREND,0,when,candlePoint,when,price);
    ObjectMove(0,link,0,when,candlePoint);ObjectMove(0,link,1,when,price);
    ObjectSetInteger(0,link,OBJPROP_RAY_RIGHT,false);ObjectSetInteger(0,link,OBJPROP_STYLE,STYLE_DOT);ObjectSetInteger(0,link,OBJPROP_COLOR,vivid);
+   ObjectSetInteger(0,link,OBJPROP_BACK,true);ObjectSetInteger(0,link,OBJPROP_ZORDER,1);ObjectSetInteger(0,link,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,link,OBJPROP_HIDDEN,true);
 }
 
 void HistoricalConditions(int shift,int supertrendDirection,bool &bull[],bool &bear[])
