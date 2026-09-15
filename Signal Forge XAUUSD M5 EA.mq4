@@ -131,6 +131,7 @@ bool gEquityCanvasReady=false;
 int gEquityCanvasWidth=0,gEquityCanvasHeight=0;
 int gEquityChartHeight=0,gEquityHistoryTotal=-1;
 int gKnownResultHistory=-1;
+int gLastResultCleanupHistory=-1;
 bool gChartLayoutDirty=false;
 uint gLastChartResultRefresh=0;
 // Incremental Supertrend cache: after one seed pass, only one bar is
@@ -926,6 +927,13 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    long chartWidth=0,chartHeight=0;
    ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartWidth);
    ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartHeight);
+   // ChartTimePriceToXY can return true for a time/price that has already
+   // scrolled beyond the visible viewport. Never clamp such a card to an edge.
+   if(anchorX<0 || anchorX>(int)chartWidth || anchorY<0 || anchorY>(int)chartHeight)
+   {
+      HideResultCardOffscreen(base);
+      return;
+   }
    // BUY results stay above all candles covered by the card. SELL results
    // stay below them. The boundary is recalculated every tick while scrolling.
    bool placeAbove=(OrderType()==OP_BUY);
@@ -1025,6 +1033,14 @@ void UpdateClosedTradeResults()
    ArrayInitialize(usedW,0); ArrayInitialize(usedH,0);
    int usedCount=0,drawn=0;
    int total=OrdersHistoryTotal();
+   // When history grows, clear cards that have fallen outside the newest
+   // MaximumResultBoxes set. Otherwise they are never visited again and can
+   // remain frozen along the top/left edge during a visual backtest.
+   if(total!=gLastResultCleanupHistory)
+   {
+      ObjectsDeleteAll(0,PREFIX+"RESULT_");
+      gLastResultCleanupHistory=total;
+   }
    if(total==gKnownResultHistory) return;
    gKnownResultHistory=total;
    for(int i=total-1;i>=0 && drawn<maximum;i--)
