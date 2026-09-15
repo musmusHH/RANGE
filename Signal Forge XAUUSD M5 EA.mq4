@@ -87,7 +87,19 @@ input int  AccountPanelY = 10;
 input EA_CORNER SignalPanelPosition = EA_Top_Right;
 input EA_CORNER PerformancePanelPosition = EA_Bottom_Right;
 input FILTER_PANEL_MODE InitialFilterPanelMode = Show_Activated_Filters_Only;
-input bool DrawEnabledFiltersOnChartByDefault = false;
+// Independent chart-drawing defaults. These affect visuals only and do not
+// enable or disable an indicator in the trading signal calculation.
+input bool DrawSMAOnChart         = true;
+input bool DrawRSIOnChart         = true;
+input bool DrawMACDOnChart        = true;
+input bool DrawSupertrendOnChart  = true;
+input bool DrawStochasticOnChart  = true;
+input bool DrawBollingerOnChart   = true;
+input bool DrawEMAOnChart         = true;
+input bool DrawAOOnChart          = true;
+input bool DrawSAROnChart         = true;
+input bool DrawCCIOnChart         = true;
+input bool DrawADXOnChart         = true;
 input int  FilterDrawingBars = 150;
 input bool DrawBuySellSignalOrbs = true;
 input int  SignalHistoryBars = 300;
@@ -1448,12 +1460,10 @@ int OnInit()
    gSellOrbResource="::SF_SELL_ORB_"+IntegerToString((int)ChartID());
    CreateSignalOrbResource(true);CreateSignalOrbResource(false);
    ArrayInitialize(gBull,false);ArrayInitialize(gBear,false);ArrayInitialize(gDrawFilter,false);
-   if(DrawEnabledFiltersOnChartByDefault)
-   {
-      gDrawFilter[0]=EnableSMA;gDrawFilter[1]=EnableRSI;gDrawFilter[2]=EnableMACD;gDrawFilter[3]=EnableSupertrend;
-      gDrawFilter[4]=EnableStochastic;gDrawFilter[5]=EnableBollinger;gDrawFilter[6]=EnableEMA;gDrawFilter[7]=EnableAO;
-      gDrawFilter[8]=EnableSAR;gDrawFilter[9]=EnableCCI;gDrawFilter[10]=EnableADX;
-   }
+   gDrawFilter[0]=DrawSMAOnChart;gDrawFilter[1]=DrawRSIOnChart;gDrawFilter[2]=DrawMACDOnChart;
+   gDrawFilter[3]=DrawSupertrendOnChart;gDrawFilter[4]=DrawStochasticOnChart;gDrawFilter[5]=DrawBollingerOnChart;
+   gDrawFilter[6]=DrawEMAOnChart;gDrawFilter[7]=DrawAOOnChart;gDrawFilter[8]=DrawSAROnChart;
+   gDrawFilter[9]=DrawCCIOnChart;gDrawFilter[10]=DrawADXOnChart;
    gShowEnabledOnly=(InitialFilterPanelMode==Show_Activated_Filters_Only);
    if(!IsTesting() || IsVisualMode()) ApplyChartTheme();
    // Timer-driven graphics are disabled in Strategy Tester. Visual tests
