@@ -88,6 +88,9 @@ input EA_CORNER SignalPanelPosition = EA_Top_Right;
 input EA_CORNER PerformancePanelPosition = EA_Bottom_Right;
 input FILTER_PANEL_MODE InitialFilterPanelMode = Show_Activated_Filters_Only;
 input bool DrawEnabledFiltersOnChartByDefault = false;
+input int  FilterDrawingBars = 150;
+input bool DrawBuySellSignalOrbs = true;
+input int  SignalHistoryBars = 300;
 input int DashboardFontSize = 9;
 input bool ShowEquityCurve = true;
 input int  EquityCurveX = 10;
@@ -121,6 +124,7 @@ bool gSTReady=false;
 double gSTUpper=0,gSTLower=0,gSTLine=0,gSTClose=0;
 int gSTDirection=0,gSTPreviousDirection=0;
 datetime gSTTime=0,gSTPreviousTime=0;
+datetime gSignalHistoryBuiltBar=0;
 // Cached account/trade tracker statistics; rebuilt only when history/day changes.
 int gTrackerHistory=-1,gTrackerTrades=0,gTrackerWins=0;
 int gPersistentSyncHistory=-1;
@@ -258,22 +262,118 @@ void DeleteSignalRow(string id)
    ObjectDelete(0,PREFIX+"FILTER_DRAW_"+id);
 }
 
+void BuildSupertrendSeries(int maxShift,int &dirs[],double &lines[])
+{
+   ArrayResize(dirs,maxShift+1);ArrayResize(lines,maxShift+1);
+   ArrayInitialize(dirs,0);ArrayInitialize(lines,EMPTY_VALUE);
+   bool ready=false;double prevUpper=0,prevLower=0,prevLine=0,prevClose=0;
+   int oldest=MathMin(Bars-2,maxShift+600);
+   for(int i=oldest;i>=0;i--)
+   {
+      double atr=iATR(NULL,0,MathMax(1,SupertrendLength),i);
+      double upper=(High[i]+Low[i])*0.5+SupertrendFactor*atr;
+      double lower=(High[i]+Low[i])*0.5-SupertrendFactor*atr;
+      double finalUpper=upper,finalLower=lower,line=upper;int direction=1;
+      if(!ready || atr<=0){if(atr>0)ready=true;}
+      else
+      {
+         finalUpper=(upper<prevUpper || prevClose>prevUpper)?upper:prevUpper;
+         finalLower=(lower>prevLower || prevClose<prevLower)?lower:prevLower;
+         if(prevLine==prevUpper)line=(Close[i]>finalUpper)?finalLower:finalUpper;
+         else line=(Close[i]<finalLower)?finalUpper:finalLower;
+         direction=(line==finalLower)?-1:1;
+      }
+      prevUpper=finalUpper;prevLower=finalLower;prevLine=line;prevClose=Close[i];
+      if(i<=maxShift){dirs[i]=ready?direction:0;lines[i]=ready?line:EMPTY_VALUE;}
+   }
+}
+
+void PlotFilterSegment(int filter,int line,int shift,double olderValue,double newerValue,color c,int width)
+{
+   string name=PREFIX+"FILTER_PLOT_"+IntegerToString(filter)+"_"+IntegerToString(line)+"_"+IntegerToString(shift);
+   if(ObjectFind(0,name)<0)ObjectCreate(0,name,OBJ_TREND,0,Time[shift+1],olderValue,Time[shift],newerValue);
+   ObjectMove(0,name,0,Time[shift+1],olderValue);ObjectMove(0,name,1,Time[shift],newerValue);
+   ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,false);ObjectSetInteger(0,name,OBJPROP_COLOR,c);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,width);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+}
+
+double OscillatorValue(int filter,int line,int shift)
+{
+   if(filter==1)return iRSI(NULL,0,RSILength,PRICE_CLOSE,shift);
+   if(filter==2)return iMACD(NULL,0,MACDFastLength,MACDSlowLength,MACDSignalLength,PRICE_CLOSE,line==0?MODE_MAIN:MODE_SIGNAL,shift);
+   if(filter==4)return iStochastic(NULL,0,StochasticKLength,StochasticDLength,StochasticSmooth,MODE_SMA,0,line==0?MODE_MAIN:MODE_SIGNAL,shift);
+   if(filter==7)return iAO(NULL,0,shift);
+   if(filter==9)return iCCI(NULL,0,CCILength,PRICE_CLOSE,shift);
+   if(filter==10)return iADX(NULL,0,ADXPeriod,PRICE_CLOSE,line==0?MODE_MAIN:(line==1?MODE_PLUSDI:MODE_MINUSDI),shift);
+   return 0;
+}
+
 void UpdateFilterChartDrawings()
 {
-   string names[11]={"SMA","RSI","MACD","SUPERTREND","STOCH","BOLLINGER","EMA","AO","SAR","CCI","ADX"};
-   double atr=iATR(NULL,0,MathMax(1,ATRLength),1);int slot=0;
-   for(int i=0;i<11;i++)
+   int bars=MathMax(10,MathMin(FilterDrawingBars,Bars-3));
+   int stDir[];double stLine[];
+   if(gDrawFilter[3])BuildSupertrendSeries(bars+1,stDir,stLine);
+   double chartMin=WindowPriceMin(),chartMax=WindowPriceMax();
+   double bandLow=chartMin+(chartMax-chartMin)*0.05;
+   double bandHigh=chartMin+(chartMax-chartMin)*0.22;
+   for(int filter=0;filter<11;filter++)
    {
-      string object=PREFIX+"FILTER_CHART_"+IntegerToString(i);
-      if(!gDrawFilter[i]){ObjectDelete(0,object);continue;}
-      double price=High[1]+atr*(0.45+slot*0.18);slot++;
-      if(ObjectFind(0,object)<0) ObjectCreate(0,object,OBJ_TEXT,0,Time[1],price);
-      ObjectMove(0,object,0,Time[1],price);
-      ObjectSetString(0,object,OBJPROP_TEXT,names[i]+" "+StatusText(gBull[i],gBear[i]));
-      ObjectSetString(0,object,OBJPROP_FONT,"Arial Bold");ObjectSetInteger(0,object,OBJPROP_FONTSIZE,8);
-      ObjectSetInteger(0,object,OBJPROP_COLOR,StatusColor(gBull[i],gBear[i]));
-      ObjectSetInteger(0,object,OBJPROP_ANCHOR,ANCHOR_CENTER);ObjectSetInteger(0,object,OBJPROP_SELECTABLE,false);
-      ObjectSetInteger(0,object,OBJPROP_HIDDEN,true);
+      ObjectsDeleteAll(0,PREFIX+"FILTER_PLOT_"+IntegerToString(filter)+"_");
+      ObjectDelete(0,PREFIX+"FILTER_CHART_"+IntegerToString(filter)); // old text-only drawing
+      if(!gDrawFilter[filter])continue;
+      if(filter==0 || filter==6)
+      {
+         int method=(filter==0)?MODE_SMA:MODE_EMA;
+         int fast=(filter==0)?SMAFastLength:EMAFastLength;
+         int slow=(filter==0)?SMASlowLength:EMASlowLength;
+         for(int s=bars;s>=1;s--)
+         {
+            PlotFilterSegment(filter,0,s,iMA(NULL,0,fast,0,method,PRICE_CLOSE,s+1),iMA(NULL,0,fast,0,method,PRICE_CLOSE,s),C'0,255,190',2);
+            PlotFilterSegment(filter,1,s,iMA(NULL,0,slow,0,method,PRICE_CLOSE,s+1),iMA(NULL,0,slow,0,method,PRICE_CLOSE,s),C'255,170,40',2);
+         }
+      }
+      else if(filter==3)
+      {
+         for(int s=bars;s>=1;s--)if(stLine[s]!=EMPTY_VALUE && stLine[s+1]!=EMPTY_VALUE)
+            PlotFilterSegment(filter,0,s,stLine[s+1],stLine[s],stDir[s]==-1?C'0,255,170':C'255,64,96',2);
+      }
+      else if(filter==5)
+      {
+         for(int s=bars;s>=1;s--)for(int line=0;line<3;line++)
+         {
+            int mode=line==0?MODE_UPPER:(line==1?MODE_MAIN:MODE_LOWER);
+            double old=iBands(NULL,0,BollingerLength,2.0,0,PRICE_CLOSE,mode,s+1),now=iBands(NULL,0,BollingerLength,2.0,0,PRICE_CLOSE,mode,s);
+            PlotFilterSegment(filter,line,s,old,now,line==1?C'255,210,60':C'80,145,255',1);
+         }
+      }
+      else if(filter==8)
+      {
+         for(int s=bars;s>=1;s--)
+         {
+            string name=PREFIX+"FILTER_PLOT_8_0_"+IntegerToString(s);double sar=iSAR(NULL,0,SARStep,SARMaximum,s);
+            if(ObjectFind(0,name)<0)ObjectCreate(0,name,OBJ_ARROW,0,Time[s],sar);
+            ObjectMove(0,name,0,Time[s],sar);ObjectSetInteger(0,name,OBJPROP_ARROWCODE,159);ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
+            ObjectSetInteger(0,name,OBJPROP_COLOR,Close[s]>sar?C'0,255,170':C'255,64,96');
+         }
+      }
+      else
+      {
+         int lineCount=(filter==2||filter==4)?2:(filter==10?3:1);
+         double rawMin=1e100,rawMax=-1e100;
+         if(filter==1||filter==4||filter==10){rawMin=0;rawMax=100;}
+         else if(filter==9){rawMin=-200;rawMax=200;}
+         else for(int s=1;s<=bars+1;s++){double v=OscillatorValue(filter,0,s);rawMin=MathMin(rawMin,v);rawMax=MathMax(rawMax,v);}
+         if(rawMax-rawMin<0.000001){rawMax+=1;rawMin-=1;}
+         for(int line=0;line<lineCount;line++)for(int s=bars;s>=1;s--)
+         {
+            double old=OscillatorValue(filter,line,s+1),now=OscillatorValue(filter,line,s);
+            old=MathMax(rawMin,MathMin(rawMax,old));now=MathMax(rawMin,MathMin(rawMax,now));
+            double mappedOld=bandLow+(old-rawMin)/(rawMax-rawMin)*(bandHigh-bandLow);
+            double mappedNow=bandLow+(now-rawMin)/(rawMax-rawMin)*(bandHigh-bandLow);
+            color lc=line==0?C'80,155,255':(line==1?C'255,190,40':C'255,64,140');
+            PlotFilterSegment(filter,line,s,mappedOld,mappedNow,lc,line==0?2:1);
+         }
+      }
    }
 }
 
@@ -297,6 +397,44 @@ void DrawSignalOrb(bool buy,int shift)
    if(ObjectFind(0,link)<0)ObjectCreate(0,link,OBJ_TREND,0,when,candlePoint,when,price);
    ObjectMove(0,link,0,when,candlePoint);ObjectMove(0,link,1,when,price);
    ObjectSetInteger(0,link,OBJPROP_RAY_RIGHT,false);ObjectSetInteger(0,link,OBJPROP_STYLE,STYLE_DOT);ObjectSetInteger(0,link,OBJPROP_COLOR,vivid);
+}
+
+void HistoricalConditions(int shift,int supertrendDirection,bool &bull[],bool &bear[])
+{
+   double a=iMA(NULL,0,SMAFastLength,0,MODE_SMA,PRICE_CLOSE,shift),b=iMA(NULL,0,SMASlowLength,0,MODE_SMA,PRICE_CLOSE,shift);
+   bull[0]=a>b;bear[0]=a<b;
+   double r=iRSI(NULL,0,RSILength,PRICE_CLOSE,shift);bull[1]=r>RSILongAbove;bear[1]=r<RSIShortBelow;
+   double m=iMACD(NULL,0,MACDFastLength,MACDSlowLength,MACDSignalLength,PRICE_CLOSE,MODE_MAIN,shift);
+   double ms=iMACD(NULL,0,MACDFastLength,MACDSlowLength,MACDSignalLength,PRICE_CLOSE,MODE_SIGNAL,shift);bull[2]=m>ms;bear[2]=m<ms;
+   bull[3]=supertrendDirection==-1;bear[3]=supertrendDirection==1;
+   double k=iStochastic(NULL,0,StochasticKLength,StochasticDLength,StochasticSmooth,MODE_SMA,0,MODE_MAIN,shift);bull[4]=k>50;bear[4]=k<50;
+   double mid=iMA(NULL,0,BollingerLength,0,MODE_SMA,PRICE_CLOSE,shift);bull[5]=Close[shift]>mid;bear[5]=Close[shift]<mid;
+   double ef=iMA(NULL,0,EMAFastLength,0,MODE_EMA,PRICE_CLOSE,shift),es=iMA(NULL,0,EMASlowLength,0,MODE_EMA,PRICE_CLOSE,shift);bull[6]=ef>es;bear[6]=ef<es;
+   double ao=iAO(NULL,0,shift);bull[7]=ao>0;bear[7]=ao<0;
+   double sar=iSAR(NULL,0,SARStep,SARMaximum,shift);bull[8]=Close[shift]>sar;bear[8]=Close[shift]<sar;
+   double cci=iCCI(NULL,0,CCILength,PRICE_CLOSE,shift);bull[9]=cci>CCILongAbove;bear[9]=cci<CCIShortBelow;
+   double adx=iADX(NULL,0,ADXPeriod,PRICE_CLOSE,MODE_MAIN,shift),dp=iADX(NULL,0,ADXPeriod,PRICE_CLOSE,MODE_PLUSDI,shift),dm=iADX(NULL,0,ADXPeriod,PRICE_CLOSE,MODE_MINUSDI,shift);
+   bull[10]=adx>ADXThreshold&&dp>dm;bear[10]=adx>ADXThreshold&&dm>dp;
+}
+
+void DrawHistoricalSignalOrbs()
+{
+   if(!DrawBuySellSignalOrbs || gSignalHistoryBuiltBar!=0)return;
+   int maximum=MathMax(10,MathMin(SignalHistoryBars,Bars-3));
+   int dirs[];double lines[];BuildSupertrendSeries(maximum+1,dirs,lines);
+   bool previousLong=false,previousShort=false;
+   for(int shift=maximum+1;shift>=1;shift--)
+   {
+      bool bull[11],bear[11];HistoricalConditions(shift,dirs[shift],bull,bear);
+      bool lng=false,sht=false;CombinedSignal(bull,bear,lng,sht);
+      if(shift<=maximum)
+      {
+         if(lng&&!previousLong)DrawSignalOrb(true,shift);
+         if(sht&&!previousShort)DrawSignalOrb(false,shift);
+      }
+      previousLong=lng;previousShort=sht;
+   }
+   gSignalHistoryBuiltBar=Time[0];
 }
 
 color StatusColor(bool bull,bool bear)
@@ -1376,9 +1514,10 @@ void OnTick()
    bool enterShort=gShortSignal && !previousShort;
    if(allowGraphics)
    {
+      DrawHistoricalSignalOrbs();
       UpdateFilterChartDrawings();
-      if(enterLong) DrawSignalOrb(true,shift);
-      if(enterShort) DrawSignalOrb(false,shift);
+      if(DrawBuySellSignalOrbs && enterLong) DrawSignalOrb(true,shift);
+      if(DrawBuySellSignalOrbs && enterShort) DrawSignalOrb(false,shift);
    }
 
    int currentType;int ticket=ActiveTicket(currentType);
