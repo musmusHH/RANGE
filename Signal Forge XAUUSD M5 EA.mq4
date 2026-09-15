@@ -31,6 +31,11 @@ input double TakeProfitPoints  = 5000.0;
 input double RiskPercent       = 0.5;
 input double RiskReferenceBalance = 0.0; // 0 = current account balance
 
+//--- ATR entry-distance filter for XAUUSD. A value of 5.0 means a maximum
+//--- entry-to-SL price distance of $5.00 on a USD-quoted gold symbol.
+input bool   EnableMaxATRSLDistanceFilter = true;
+input double MaximumATRSLPriceDistance    = 5.0;
+
 //--- Point trailing stop (requested defaults)
 input bool   EnableTrailingStop = true;
 input double TrailingStartPoints = 700.0;
@@ -412,7 +417,14 @@ bool OpenPosition(int type)
    double lots=NormalizeLots(FixedLots);
    double entry=(type==OP_BUY)?Ask:Bid;
    double atr=iATR(NULL,0,MathMax(1,ATRLength),1);
-   double slDistance=(StopLossMode==SL_By_Risk_Percent)?RiskStopDistance(lots):atr*MathMax(0.1,StopLossATR);
+   double atrSLDistance=atr*MathMax(0.1,StopLossATR);
+   if(EnableMaxATRSLDistanceFilter && MaximumATRSLPriceDistance>0.0 && atrSLDistance>MaximumATRSLPriceDistance)
+   {
+      gLastAction="IGNORED: ATR SL $"+DoubleToString(atrSLDistance,2)+" > $"+DoubleToString(MaximumATRSLPriceDistance,2);
+      Print("Signal Forge signal ignored. ",gLastAction);
+      return false;
+   }
+   double slDistance=(StopLossMode==SL_By_Risk_Percent)?RiskStopDistance(lots):atrSLDistance;
    double tpDistance=(TakeProfitMode==TP_By_Points)?MathMax(Point,TakeProfitPoints*Point):atr*MathMax(0.1,TakeProfitATR);
    double minimum=(MarketInfo(Symbol(),MODE_STOPLEVEL)+2)*Point;
    slDistance=MathMax(slDistance,minimum);
