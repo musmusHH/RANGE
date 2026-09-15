@@ -13,7 +13,7 @@
 input int    MagicNumber       = 260914;
 input double FixedLots         = 0.01;
 input int    SlippagePoints    = 50;
-input int    MaximumSpreadPoints = 150;
+input int    MaximumSpreadPoints = 91;
 input bool   OnePositionOnly   = true;
 input bool   CloseOnOppositeSignal = true;
 input bool   TradeOnClosedBar  = true;
@@ -44,7 +44,7 @@ input bool RequireAllEnabledIndicatorsToAlign = true;
 input bool EnableSMA = false;
 input int  SMAFastLength = 9;
 input int  SMASlowLength = 30;
-input bool EnableRSI = true;
+input bool EnableRSI = false;
 input int  RSILength = 14;
 input double RSILongAbove = 52.0;
 input double RSIShortBelow = 48.0;
@@ -61,7 +61,7 @@ input int  StochasticDLength = 3;
 input int  StochasticSmooth = 3;
 input bool EnableBollinger = false;
 input int  BollingerLength = 20;
-input bool EnableEMA = true;
+input bool EnableEMA = false;
 input int  EMAFastLength = 9;
 input int  EMASlowLength = 21;
 input bool EnableAO = false;
@@ -72,7 +72,7 @@ input bool EnableCCI = false;
 input int  CCILength = 20;
 input double CCILongAbove = 50.0;
 input double CCIShortBelow = -50.0;
-input bool EnableADX = true;
+input bool EnableADX = false;
 input int  ADXPeriod = 14;
 input double ADXThreshold = 22.0;
 
@@ -86,7 +86,7 @@ input int  AccountPanelX = 10;
 input int  AccountPanelY = 10;
 input EA_CORNER SignalPanelPosition = EA_Top_Right;
 input EA_CORNER PerformancePanelPosition = EA_Bottom_Right;
-input FILTER_PANEL_MODE InitialFilterPanelMode = Show_All_Filters;
+input FILTER_PANEL_MODE InitialFilterPanelMode = Show_Activated_Filters_Only;
 input int DashboardFontSize = 9;
 input bool ShowEquityCurve = true;
 input int  EquityCurveX = 10;
@@ -120,6 +120,7 @@ int gSTDirection=0,gSTPreviousDirection=0;
 datetime gSTTime=0,gSTPreviousTime=0;
 // Cached account/trade tracker statistics; rebuilt only when history/day changes.
 int gTrackerHistory=-1,gTrackerTrades=0,gTrackerWins=0;
+int gPersistentSyncHistory=-1;
 datetime gTrackerDay=0;
 double gTrackerGrossProfit=0,gTrackerGrossLoss=0,gTrackerMaxDD=0;
 double gTrackerDaily=0,gTrackerWeekly=0,gTrackerMonthly=0,gTrackerTotal=0;
@@ -657,9 +658,56 @@ void UpdateClosedTradeResults()
    ChartRedraw(0);
 }
 
+// Persistent terminal statistics survive EA removal/re-attachment even when
+// MT4's Account History tab is later set to a shorter display range.
+string PersistentStatKey(string suffix)
+{
+   return "SFH."+IntegerToString(AccountNumber())+"."+IntegerToString(MagicNumber)+"."+Symbol()+"."+suffix;
+}
+
+double PersistentGet(string suffix)
+{
+   string key=PersistentStatKey(suffix);
+   if(!GlobalVariableCheck(key)) GlobalVariableSet(key,0.0);
+   return GlobalVariableGet(key);
+}
+
+void PersistentAdd(string suffix,double value)
+{
+   string key=PersistentStatKey(suffix);
+   GlobalVariableSet(key,PersistentGet(suffix)+value);
+}
+
+void SyncPersistentTradeHistory()
+{
+   if(IsTesting()) return; // tester runs must remain isolated and repeatable
+   int history=OrdersHistoryTotal();
+   if(history==gPersistentSyncHistory) return;
+   gPersistentSyncHistory=history;
+   for(int i=0;i<history;i++) if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+   {
+      if(OrderSymbol()!=Symbol() || OrderMagicNumber()!=MagicNumber || (OrderType()!=OP_BUY && OrderType()!=OP_SELL)) continue;
+      string marker=PersistentStatKey("T"+IntegerToString(OrderTicket()));
+      if(GlobalVariableCheck(marker)){GlobalVariableGet(marker);continue;}
+      double result=OrderProfit()+OrderSwap()+OrderCommission();
+      PersistentAdd("TR",1.0);
+      if(result>0){PersistentAdd("WN",1.0);PersistentAdd("GP",result);}
+      else PersistentAdd("GL",MathAbs(result));
+      PersistentAdd("NET",result);
+      GlobalVariableSet(marker,(double)OrderCloseTime());
+   }
+}
+
 //+------------------------------------------------------------------+
 void HistoryStats(int &trades,int &wins,int &losses,double &net)
 {
+   if(!IsTesting())
+   {
+      SyncPersistentTradeHistory();
+      trades=(int)PersistentGet("TR");wins=(int)PersistentGet("WN");
+      losses=trades-wins;if(losses<0)losses=0;net=PersistentGet("NET");
+      return;
+   }
    static int cachedHistory=-1,cachedTrades=0,cachedWins=0,cachedLosses=0;
    static double cachedNet=0;
    int history=OrdersHistoryTotal();
@@ -875,6 +923,16 @@ void UpdateTrackerCache()
       running+=OrderProfit()+OrderSwap()+OrderCommission();
       peak=MathMax(peak,running);
       if(peak>0) gTrackerMaxDD=MathMax(gTrackerMaxDD,(peak-running)/peak*100.0);
+   }
+   if(!IsTesting())
+   {
+      SyncPersistentTradeHistory();
+      double savedDD=PersistentGet("DD");
+      if(gTrackerMaxDD>savedDD) GlobalVariableSet(PersistentStatKey("DD"),gTrackerMaxDD);
+      else gTrackerMaxDD=savedDD;
+      gTrackerTrades=(int)PersistentGet("TR");gTrackerWins=(int)PersistentGet("WN");
+      gTrackerGrossProfit=PersistentGet("GP");gTrackerGrossLoss=PersistentGet("GL");
+      gTrackerTotal=PersistentGet("NET");
    }
 }
 
