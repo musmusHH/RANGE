@@ -245,6 +245,15 @@ void DrawFilterToggle(EA_CORNER pos,int panelX,int panelY,int panelW,int panelH,
    ObjectSetInteger(0,FILTER_BUTTON_NAME,OBJPROP_HIDDEN,true);
 }
 
+bool IsTradingFilterEnabled(int index)
+{
+   if(index==0)return EnableSMA;if(index==1)return EnableRSI;if(index==2)return EnableMACD;
+   if(index==3)return EnableSupertrend;if(index==4)return EnableStochastic;if(index==5)return EnableBollinger;
+   if(index==6)return EnableEMA;if(index==7)return EnableAO;if(index==8)return EnableSAR;
+   if(index==9)return EnableCCI;if(index==10)return EnableADX;
+   return false;
+}
+
 void DrawPerFilterButton(int index,EA_CORNER pos,int panelX,int panelY,int panelW,int panelH,
                          int left,int top,int width,int height)
 {
@@ -254,18 +263,21 @@ void DrawPerFilterButton(int index,EA_CORNER pos,int panelX,int panelY,int panel
    int x=right?panelX+panelW-left:panelX+left;
    int y=bottom?panelY+panelH-top:panelY+top;
    if(ObjectFind(0,name)<0) ObjectCreate(0,name,OBJ_BUTTON,0,0,0);
+   bool active=IsTradingFilterEnabled(index);
    ObjectSetInteger(0,name,OBJPROP_CORNER,CornerValue(pos));
    ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
    ObjectSetInteger(0,name,OBJPROP_XSIZE,width);ObjectSetInteger(0,name,OBJPROP_YSIZE,height);
-   // Native MT4 buttons are raised while STATE=false. Vivid blue means the
-   // real indicator plot is shown; solid gold means it is hidden.
-   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,gDrawFilter[index]?C'0,125,215':C'170,100,0');
+   // Only active trading filters can be drawn. Blue means shown, gold means
+   // manually hidden, and gray identifies an inactive filter.
+   color bg=!active?C'55,60,72':(gDrawFilter[index]?C'0,125,215':C'170,100,0');
+   color border=!active?C'105,112,128':(gDrawFilter[index]?C'105,215,255':C'255,205,70');
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,bg);
    ObjectSetInteger(0,name,OBJPROP_COLOR,C'255,255,255');
-   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,gDrawFilter[index]?C'105,215,255':C'255,205,70');
+   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,border);
    ObjectSetInteger(0,name,OBJPROP_FONTSIZE,MathMax(7,DashboardFontSize-1));
    ObjectSetString(0,name,OBJPROP_FONT,"Arial Black");
-   ObjectSetString(0,name,OBJPROP_TEXT,gDrawFilter[index]?"SHOWN":"HIDDEN");
-   ObjectSetInteger(0,name,OBJPROP_STATE,false);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
+   ObjectSetString(0,name,OBJPROP_TEXT,!active?"INACTIVE":(gDrawFilter[index]?"SHOWN":"HIDDEN"));
+   ObjectSetInteger(0,name,OBJPROP_STATE,false);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,active);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);ObjectSetInteger(0,name,OBJPROP_ZORDER,110);
 }
 
@@ -331,7 +343,7 @@ void UpdateFilterChartDrawings()
 {
    int bars=MathMax(10,MathMin(FilterDrawingBars,Bars-3));
    int stDir[];double stLine[];
-   if(gDrawFilter[3])BuildSupertrendSeries(bars+1,stDir,stLine);
+   if(EnableSupertrend && gDrawFilter[3])BuildSupertrendSeries(bars+1,stDir,stLine);
    double chartMin=WindowPriceMin(),chartMax=WindowPriceMax();
    double bandLow=chartMin+(chartMax-chartMin)*0.05;
    double bandHigh=chartMin+(chartMax-chartMin)*0.22;
@@ -339,7 +351,7 @@ void UpdateFilterChartDrawings()
    {
       ObjectsDeleteAll(0,PREFIX+"FILTER_PLOT_"+IntegerToString(filter)+"_");
       ObjectDelete(0,PREFIX+"FILTER_CHART_"+IntegerToString(filter)); // old text-only drawing
-      if(!gDrawFilter[filter])continue;
+      if(!IsTradingFilterEnabled(filter) || !gDrawFilter[filter])continue;
       if(filter==0 || filter==6)
       {
          int method=(filter==0)?MODE_SMA:MODE_EMA;
@@ -1460,10 +1472,10 @@ int OnInit()
    gSellOrbResource="::SF_SELL_ORB_"+IntegerToString((int)ChartID());
    CreateSignalOrbResource(true);CreateSignalOrbResource(false);
    ArrayInitialize(gBull,false);ArrayInitialize(gBear,false);ArrayInitialize(gDrawFilter,false);
-   gDrawFilter[0]=DrawSMAOnChart;gDrawFilter[1]=DrawRSIOnChart;gDrawFilter[2]=DrawMACDOnChart;
-   gDrawFilter[3]=DrawSupertrendOnChart;gDrawFilter[4]=DrawStochasticOnChart;gDrawFilter[5]=DrawBollingerOnChart;
-   gDrawFilter[6]=DrawEMAOnChart;gDrawFilter[7]=DrawAOOnChart;gDrawFilter[8]=DrawSAROnChart;
-   gDrawFilter[9]=DrawCCIOnChart;gDrawFilter[10]=DrawADXOnChart;
+   gDrawFilter[0]=EnableSMA&&DrawSMAOnChart;gDrawFilter[1]=EnableRSI&&DrawRSIOnChart;gDrawFilter[2]=EnableMACD&&DrawMACDOnChart;
+   gDrawFilter[3]=EnableSupertrend&&DrawSupertrendOnChart;gDrawFilter[4]=EnableStochastic&&DrawStochasticOnChart;gDrawFilter[5]=EnableBollinger&&DrawBollingerOnChart;
+   gDrawFilter[6]=EnableEMA&&DrawEMAOnChart;gDrawFilter[7]=EnableAO&&DrawAOOnChart;gDrawFilter[8]=EnableSAR&&DrawSAROnChart;
+   gDrawFilter[9]=EnableCCI&&DrawCCIOnChart;gDrawFilter[10]=EnableADX&&DrawADXOnChart;
    gShowEnabledOnly=(InitialFilterPanelMode==Show_Activated_Filters_Only);
    if(!IsTesting() || IsVisualMode()) ApplyChartTheme();
    // Timer-driven graphics are disabled in Strategy Tester. Visual tests
@@ -1505,7 +1517,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
    if(id==CHARTEVENT_OBJECT_CLICK && StringFind(sparam,drawPrefix,0)==0)
    {
       int index=(int)StringToInteger(StringSubstr(sparam,StringLen(drawPrefix)));
-      if(index>=0 && index<11)
+      if(index>=0 && index<11 && IsTradingFilterEnabled(index))
       {
          gDrawFilter[index]=!gDrawFilter[index];
          ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
