@@ -136,6 +136,7 @@ double gTrackerGrossProfit=0,gTrackerGrossLoss=0,gTrackerMaxDD=0;
 double gTrackerDaily=0,gTrackerWeekly=0,gTrackerMonthly=0,gTrackerTotal=0;
 double gTrackerDayProfit[5],gTrackerDayLots[5];
 string FILTER_BUTTON_NAME="SF_EA_SIG_FILTER_BUTTON";
+string gBuyOrbResource="",gSellOrbResource="";
 
 //+------------------------------------------------------------------+
 int CornerValue(EA_CORNER p)
@@ -381,29 +382,67 @@ void UpdateFilterChartDrawings()
    }
 }
 
+void CreateSignalOrbResource(bool buy)
+{
+   int side=MathMax(24,SignalCircleSize*2);
+   int center=side/2;double radius=center-1;
+   int shadow=MathMax(1,MathMin(3,SignalCircleShadowSize));
+   uint pixels[];ArrayResize(pixels,side*side);ArrayInitialize(pixels,0);
+   uint outer=ColorToARGB(buy?C'0,62,52':C'85,12,30',255);
+   uint main=ColorToARGB(buy?C'0,225,145':C'235,42,76',255);
+   uint light=ColorToARGB(buy?C'80,255,205':C'255,120,145',255);
+   for(int y=0;y<side;y++)for(int x=0;x<side;x++)
+   {
+      double dx=x-center+0.5,dy=y-center+0.5,d=MathSqrt(dx*dx+dy*dy);
+      if(d<=radius)
+      {
+         uint value=(d>radius-shadow)?outer:main;
+         if(d>radius-shadow-1 && x<center && y<center)value=light;
+         pixels[y*side+x]=value;
+      }
+   }
+   string pattern[7];
+   if(buy)
+   {
+      pattern[0]="11110";pattern[1]="10001";pattern[2]="10001";pattern[3]="11110";
+      pattern[4]="10001";pattern[5]="10001";pattern[6]="11110";
+   }
+   else
+   {
+      pattern[0]="01111";pattern[1]="10000";pattern[2]="10000";pattern[3]="01110";
+      pattern[4]="00001";pattern[5]="00001";pattern[6]="11110";
+   }
+   int scale=MathMax(1,MathMin(3,SignalLetterFontSize/4));
+   int startX=(side-5*scale)/2,startY=(side-7*scale)/2;
+   uint white=ColorToARGB(C'255,255,255',255);
+   for(int row=0;row<7;row++)for(int col=0;col<5;col++)if(StringSubstr(pattern[row],col,1)=="1")
+      for(int py=0;py<scale;py++)for(int px=0;px<scale;px++)
+      {
+         int drawX=startX+col*scale+px,drawY=startY+row*scale+py;
+         if(drawX>=0&&drawX<side&&drawY>=0&&drawY<side)pixels[drawY*side+drawX]=white;
+      }
+   string resource=buy?gBuyOrbResource:gSellOrbResource;
+   ResourceFree(resource);
+   if(!ResourceCreate(resource,pixels,side,side,0,0,side,COLOR_FORMAT_ARGB_NORMALIZE))
+      Print("Signal orb resource error: ",GetLastError());
+}
+
 void DrawSignalOrb(bool buy,int shift)
 {
    datetime when=Time[shift];double atr=iATR(NULL,0,MathMax(1,ATRLength),shift);
    double price=buy?Low[shift]-atr*0.65:High[shift]+atr*0.65;
    string id=IntegerToString((int)when)+(buy?"_B":"_S");string base=PREFIX+"SIGNAL_ORB_"+id;
-   color dark=buy?C'0,82,66':C'110,18,38';color vivid=buy?C'0,255,170':C'255,64,96';
-   string outer=base+"_OUT",inner=base+"_IN",letter=base+"_TXT",link=base+"_LINK";
-   if(ObjectFind(0,outer)<0)ObjectCreate(0,outer,OBJ_ARROW,0,when,price);
-   if(ObjectFind(0,inner)<0)ObjectCreate(0,inner,OBJ_ARROW,0,when,price);
-   ObjectMove(0,outer,0,when,price);ObjectMove(0,inner,0,when,price);
-   int circleSize=MathMax(8,SignalCircleSize);
-   int shadowSize=MathMax(1,MathMin(circleSize-2,SignalCircleShadowSize));
-   ObjectSetInteger(0,outer,OBJPROP_ARROWCODE,159);ObjectSetInteger(0,outer,OBJPROP_COLOR,dark);ObjectSetInteger(0,outer,OBJPROP_WIDTH,circleSize);
-   ObjectSetInteger(0,outer,OBJPROP_ANCHOR,ANCHOR_CENTER);ObjectSetInteger(0,outer,OBJPROP_BACK,false);ObjectSetInteger(0,outer,OBJPROP_ZORDER,50);
-   ObjectSetInteger(0,inner,OBJPROP_ARROWCODE,159);ObjectSetInteger(0,inner,OBJPROP_COLOR,vivid);ObjectSetInteger(0,inner,OBJPROP_WIDTH,MathMax(6,circleSize-shadowSize));
-   ObjectSetInteger(0,inner,OBJPROP_ANCHOR,ANCHOR_CENTER);ObjectSetInteger(0,inner,OBJPROP_BACK,false);ObjectSetInteger(0,inner,OBJPROP_ZORDER,51);
-   if(ObjectFind(0,letter)<0)ObjectCreate(0,letter,OBJ_TEXT,0,when,price);
-   ObjectMove(0,letter,0,when,price);ObjectSetString(0,letter,OBJPROP_TEXT,buy?"B":"S");
-   ObjectSetString(0,letter,OBJPROP_FONT,"Arial Black");ObjectSetInteger(0,letter,OBJPROP_FONTSIZE,MathMax(8,SignalLetterFontSize));
-   ObjectSetInteger(0,letter,OBJPROP_COLOR,C'255,255,255');ObjectSetInteger(0,letter,OBJPROP_ANCHOR,ANCHOR_CENTER);
-   ObjectSetInteger(0,letter,OBJPROP_BACK,false);ObjectSetInteger(0,letter,OBJPROP_ZORDER,52);
-   ObjectSetInteger(0,outer,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,inner,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,letter,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,outer,OBJPROP_HIDDEN,true);ObjectSetInteger(0,inner,OBJPROP_HIDDEN,true);ObjectSetInteger(0,letter,OBJPROP_HIDDEN,true);
+   color vivid=buy?C'0,255,170':C'255,64,96';
+   string bitmap=base+"_BMP",link=base+"_LINK";
+   // Remove legacy separate circle/text objects. The replacement is one
+   // bitmap, so the B/S pixels can never drift outside the circle.
+   ObjectDelete(0,base+"_OUT");ObjectDelete(0,base+"_IN");ObjectDelete(0,base+"_TXT");
+   if(ObjectFind(0,bitmap)<0)ObjectCreate(0,bitmap,OBJ_BITMAP,0,when,price);
+   ObjectMove(0,bitmap,0,when,price);
+   ObjectSetString(0,bitmap,OBJPROP_BMPFILE,0,buy?gBuyOrbResource:gSellOrbResource);
+   ObjectSetInteger(0,bitmap,OBJPROP_ANCHOR,ANCHOR_CENTER);
+   ObjectSetInteger(0,bitmap,OBJPROP_BACK,false);ObjectSetInteger(0,bitmap,OBJPROP_ZORDER,52);
+   ObjectSetInteger(0,bitmap,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,bitmap,OBJPROP_HIDDEN,true);
    double candlePoint=buy?Low[shift]:High[shift];
    if(ObjectFind(0,link)<0)ObjectCreate(0,link,OBJ_TREND,0,when,candlePoint,when,price);
    ObjectMove(0,link,0,when,candlePoint);ObjectMove(0,link,1,when,price);
@@ -1399,6 +1438,9 @@ void UpdateDashboard()
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   gBuyOrbResource="::SF_BUY_ORB_"+IntegerToString((int)ChartID());
+   gSellOrbResource="::SF_SELL_ORB_"+IntegerToString((int)ChartID());
+   CreateSignalOrbResource(true);CreateSignalOrbResource(false);
    ArrayInitialize(gBull,false);ArrayInitialize(gBear,false);ArrayInitialize(gDrawFilter,false);
    if(DrawEnabledFiltersOnChartByDefault)
    {
@@ -1420,6 +1462,8 @@ void OnDeinit(const int reason)
    EventKillTimer();
    DestroyEquityCurve();
    ObjectsDeleteAll(0,PREFIX);
+   if(gBuyOrbResource!="")ResourceFree(gBuyOrbResource);
+   if(gSellOrbResource!="")ResourceFree(gSellOrbResource);
 }
 
 void OnTimer()
