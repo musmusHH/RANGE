@@ -140,6 +140,7 @@ input int  LeftMargin = 15;
 input int  RightMargin = 15;
 input int  TopMargin = 20;
 input int  BottomMargin = 20;
+input int  BottomPanelGapAboveEquity = 24;
 input int  PanelFontSize = 8;
 input int  ValueFontSize = 9;
 input double DailyProfitTargetDisplay = 30.0; // dashboard reference only; does not affect trading
@@ -1661,6 +1662,7 @@ void UIRect(string id,int x,int y,int width,int height,color background,color bo
 
 void CreatePanel(string id,int x,int y,int width,int height)
 {
+   UIRect(id+"_GLOW",x-2,y-2,width+4,height+4,C'5,14,30',C'0,92,190');
    UIRect(id+"_SHADOW",x+3,y+3,width,height,C'4,7,14',C'4,7,14');
    UIRect(id+"_PANEL",x,y,width,height,PanelBackground,PanelBorder);
    UIRect(id+"_ACCENT",x,y,4,height,AccentColor,AccentColor);
@@ -1668,6 +1670,7 @@ void CreatePanel(string id,int x,int y,int width,int height)
 
 void CreateRightPanel(string id,int rightDistance,int absoluteX,int y,int width,int height)
 {
+   UIRect(id+"_GLOW",absoluteX-2,y-2,width+4,height+4,C'5,14,30',C'0,145,170');
    string shadow=PREFIX+"UI_"+id+"_SHADOW",panel=PREFIX+"UI_"+id+"_PANEL";
    if(UIEnsureObject(shadow,OBJ_RECTANGLE_LABEL))
    {
@@ -1776,14 +1779,25 @@ void UpdateDashboard()
    int leftH=(int)MathMax(340,LeftPanelHeight),rightH=(int)MathMax(340,RightPanelHeight);
    int leftX=LeftMargin,leftY=TopMargin,rightX=chartW-RightMargin-rightW,rightY=TopMargin;
    int bottomW=(int)MathMin(MathMax(500,BottomPanelWidth),chartW-30),bottomH=(int)MathMax(190,BottomPanelHeight);
-   int equityReserve=ShowEquityCurve?EquityCurveY+EquityCurveHeight+12:0;
-   int bottomX=(chartW-bottomW)/2,bottomY=chartH-BottomMargin-equityReserve-bottomH;
+   int panelGap=(int)MathMax(8,BottomPanelGapAboveEquity);
+   // The equity canvas is bottom-anchored at EquityCurveY. Its exact screen
+   // top is therefore chartH-EquityCurveY-EquityCurveHeight. Treat that top
+   // edge as a hard limit: the management panel may never extend below it.
+   int lowerBoundary=ShowEquityCurve
+                     ?chartH-MathMax(0,EquityCurveY)-MathMax(1,EquityCurveHeight)-panelGap
+                     :chartH-MathMax(0,BottomMargin);
+   if(bottomH>lowerBoundary)bottomH=(int)MathMax(1,lowerBoundary);
+   int bottomX=(chartW-bottomW)/2,bottomY=lowerBoundary-bottomH;
    int topBottom=TopMargin+(int)MathMax(leftH,rightH);
-   if(bottomY<topBottom+12)
+   int availableBetween=lowerBoundary-(topBottom+12);
+   if(bottomY<topBottom+12 && availableBetween>=150)
    {
-      int available=chartH-BottomMargin-equityReserve-topBottom-12;
-      bottomH=(int)MathMax(150,MathMin(bottomH,available));bottomY=topBottom+12;
+      // On a shorter chart compact the panel into the available vertical
+      // lane, but preserve the hard no-overlap boundary above equity.
+      bottomH=(int)MathMin(bottomH,availableBetween);
+      bottomY=lowerBoundary-bottomH;
    }
+   bottomY=(int)MathMax(0,bottomY);
 
    double spread=(Ask-Bid)/Point,floating=0;int openTrades=UIOpenTrades(floating);
    double today=TodayClosedPL(),marginLevel=AccountMargin()>0?AccountEquity()/AccountMargin()*100.0:0;
