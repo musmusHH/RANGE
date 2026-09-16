@@ -81,6 +81,7 @@ enum EA_CORNER { EA_Top_Right=0, EA_Bottom_Right=1, EA_Bottom_Left=2, EA_Top_Lef
 enum FILTER_PANEL_MODE { Show_All_Filters=0, Show_Activated_Filters_Only=1 };
 input bool ApplyProfessionalChartTheme = true;
 input bool ShowDashboard = true;
+input bool KeepVisualsAfterBacktest = true;
 input bool ShowAccountProfitPanel = true;
 input int  AccountPanelX = 10;
 input int  AccountPanelY = 10;
@@ -1481,9 +1482,62 @@ void UpdateDashboard()
    ChartRedraw(0);
 }
 
+void FinalEquityPixel(string id,int x,int y,int width,int height,color c)
+{
+   string name=PREFIX+"FINAL_EQ_"+id;
+   if(ObjectFind(0,name)<0)ObjectCreate(0,name,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,width);ObjectSetInteger(0,name,OBJPROP_YSIZE,height);
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,c);ObjectSetInteger(0,name,OBJPROP_COLOR,c);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+}
+
+void DrawPersistentFinalEquityCurve()
+{
+   ObjectsDeleteAll(0,PREFIX+"FINAL_EQ_");
+   long chartW=0,chartH=0;ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartW);ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartH);
+   int performanceWidth=390,gap=10;
+   int width=(int)chartW-MathMax(0,EquityCurveX)-10-performanceWidth-gap;
+   int height=MathMax(90,EquityCurveHeight),panelX=MathMax(0,EquityCurveX),panelY=MathMax(0,EquityCurveY);
+   if(width<220)return;
+   DrawPanel("FINAL_EQ",EA_Bottom_Left,panelX,panelY,width,height);
+   DrawCell("FINAL_EQ","TITLE",EA_Bottom_Left,panelX,panelY,width,height,6,5,width-12,20,"FINAL EA EQUITY CURVE",C'225,235,255',C'15,30,55',9);
+
+   int count=0;double totalNet=0;
+   for(int i=0;i<OrdersHistoryTotal();i++)if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+      if(OrderSymbol()==Symbol()&&OrderMagicNumber()==MagicNumber&&(OrderType()==OP_BUY||OrderType()==OP_SELL)){count++;totalNet+=OrderProfit()+OrderSwap()+OrderCommission();}
+   double start=AccountBalance()-totalNet,cumulative=start,minV=start,maxV=start;
+   double curve[];ArrayResize(curve,count+1);ArrayInitialize(curve,start);int n=0;
+   for(int j=0;j<OrdersHistoryTotal();j++)if(OrderSelect(j,SELECT_BY_POS,MODE_HISTORY))
+   {
+      if(OrderSymbol()!=Symbol()||OrderMagicNumber()!=MagicNumber||(OrderType()!=OP_BUY&&OrderType()!=OP_SELL))continue;
+      cumulative+=OrderProfit()+OrderSwap()+OrderCommission();n++;curve[n]=cumulative;minV=MathMin(minV,cumulative);maxV=MathMax(maxV,cumulative);
+   }
+   if(maxV-minV<0.01){maxV+=1;minV-=1;}
+   int left=panelX+45,right=panelX+width-10,top=(int)chartH-panelY-height+27,bottom=(int)chartH-panelY-20;
+   for(int g=0;g<=3;g++)FinalEquityPixel("GRID"+IntegerToString(g),left,top+(bottom-top)*g/3,right-left,1,C'42,56,82');
+   if(n>0)
+   {
+      int plotWidth=MathMax(1,right-left),dot=0;
+      for(int pixel=0;pixel<=plotWidth;pixel+=2)
+      {
+         double u=(double)pixel*n/plotWidth;int index=MathMin(n-1,(int)MathFloor(u));double t=u-index,t2=t*t,t3=t2*t;
+         double p0=curve[MathMax(0,index-1)],p1=curve[index],p2=curve[MathMin(n,index+1)],p3=curve[MathMin(n,index+2)];
+         double value=0.5*((2*p1)+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t2+(-p0+3*p1-3*p2+p3)*t3);
+         value=MathMax(minV,MathMin(maxV,value));int py=bottom-(int)MathRound((value-minV)/(maxV-minV)*(bottom-top));
+         FinalEquityPixel("DOT"+IntegerToString(dot++),left+pixel,py,3,3,C'45,105,255');
+      }
+   }
+   DrawCell("FINAL_EQ","NET",EA_Bottom_Left,panelX,panelY,width,height,width-135,5,129,20,"NET "+(totalNet>=0?"+":"")+DoubleToString(totalNet,2),totalNet>=0?C'0,255,170':C'255,64,96',C'15,30,55',9);
+   ChartRedraw(0);
+}
+
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   // Remove a static snapshot left by a previous completed tester run.
+   ObjectsDeleteAll(0,PREFIX+"FINAL_EQ_");
    gBuyOrbResource="::SF_BUY_ORB_"+IntegerToString((int)ChartID());
    gSellOrbResource="::SF_SELL_ORB_"+IntegerToString((int)ChartID());
    CreateSignalOrbResource(true);CreateSignalOrbResource(false);
@@ -1504,6 +1558,19 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   if(IsTesting() && IsVisualMode() && KeepVisualsAfterBacktest)
+   {
+      // Preserve regular chart objects and replace the dynamic Canvas (which
+      // MT4 destroys with the EA) with a static raised final-equity snapshot.
+      UpdateDashboard();
+      UpdateFilterChartDrawings();
+      gKnownResultHistory=-1;UpdateClosedTradeResults();
+      DrawPersistentFinalEquityCurve();
+      DestroyEquityCurve();
+      // Do not explicitly free signal bitmap resources in preserve mode.
+      ChartRedraw(0);
+      return;
+   }
    DestroyEquityCurve();
    ObjectsDeleteAll(0,PREFIX);
    if(gBuyOrbResource!="")ResourceFree(gBuyOrbResource);
