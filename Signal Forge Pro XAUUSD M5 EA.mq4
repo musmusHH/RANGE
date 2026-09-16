@@ -130,18 +130,19 @@ input bool ShowDashboard = true;
 input bool ShowLeftPanel = true;
 input bool ShowRightPanel = true;
 input bool ShowBottomPanel = true;
-input int  LeftPanelWidth = 310;
-input int  LeftPanelHeight = 300;
-input int  RightPanelWidth = 310;
-input int  RightPanelHeight = 300;
-input int  BottomPanelWidth = 560;
-input int  BottomPanelHeight = 150;
+input int  LeftPanelWidth = 580;
+input int  LeftPanelHeight = 370;
+input int  RightPanelWidth = 470;
+input int  RightPanelHeight = 370;
+input int  BottomPanelWidth = 600;
+input int  BottomPanelHeight = 220;
 input int  LeftMargin = 15;
 input int  RightMargin = 15;
 input int  TopMargin = 20;
 input int  BottomMargin = 20;
 input int  PanelFontSize = 8;
 input int  ValueFontSize = 9;
+input double DailyProfitTargetDisplay = 30.0; // dashboard reference only; does not affect trading
 input color PanelBackground = C'11,16,32';
 input color PanelBorder = C'48,67,94';
 input color HeaderColor = C'17,31,52';
@@ -179,7 +180,7 @@ input int  SignalCircleSize = 16;
 input int  SignalCircleShadowSize = 1;
 input int  SignalLetterFontSize = 12;
 input int DashboardFontSize = 9;
-input bool ShowEquityCurve = false; // legacy canvas disabled to keep the lower-center management panel clear
+input bool ShowEquityCurve = true; // lower management panel automatically reserves this canvas area
 input int  EquityCurveX = 10;
 input int  EquityCurveY = 10;
 input int  EquityCurveHeight = 126;
@@ -1732,10 +1733,35 @@ void DeletePanelObjects()
    ObjectsDeleteAll(0,PREFIX+"UI_");
 }
 
+void UICard(string id,int x,int y,int width,int height)
+{
+   UIRect(id,x,y,width,height,C'10,25,49',C'21,82,145');
+}
+
+void UIProgressBar(string id,int x,int y,int width,double value,double maximum,color fill)
+{
+   double ratio=maximum>0?MathMax(0,MathMin(1,value/maximum)):0;
+   UIRect(id+"_TRACK",x,y,width,10,C'18,48,91',C'23,62,112');
+   UIRect(id+"_FILL",x,y,(int)MathMax(2,width*ratio),10,fill,fill);
+}
+
+double EnabledWeightTotal()
+{
+   double total=0;
+   if(EnableSMA)total+=SMAWeight;if(EnableRSI)total+=RSIWeight;if(EnableMACD)total+=MACDWeight;if(EnableSupertrend)total+=SupertrendWeight;
+   if(EnableStochastic)total+=StochasticWeight;if(EnableBollinger)total+=BollingerWeight;if(EnableEMA)total+=EMAWeight;if(EnableAO)total+=AOWeight;
+   if(EnableSAR)total+=SARWeight;if(EnableCCI)total+=CCIWeight;if(EnableADX)total+=ADXWeight;
+   return MathMax(1,total);
+}
+
+string UIDuration(datetime opened)
+{
+   if(opened<=0)return "--:--:--";int seconds=(int)MathMax(0,TimeCurrent()-opened);
+   return StringFormat("%02d:%02d:%02d",seconds/3600,(seconds%3600)/60,seconds%60);
+}
+
 void UpdateDashboard()
 {
-   // Retire legacy dashboard objects once. Trade drawings, filter plots,
-   // signal markers and result cards use different names and remain untouched.
    if(!gLegacyDashboardCleared)
    {
       ObjectsDeleteAll(0,PREFIX+"SIG_");ObjectsDeleteAll(0,PREFIX+"PERF_");ObjectsDeleteAll(0,PREFIX+"ACCOUNT_");
@@ -1743,87 +1769,116 @@ void UpdateDashboard()
    }
    if(!ShowDashboard){DeletePanelObjects();return;}
 
-   long chartWidthLong=0,chartHeightLong=0;
-   ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartWidthLong);ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartHeightLong);
-   int chartWidth=(int)chartWidthLong,chartHeight=(int)chartHeightLong;
-   if(chartWidth<200||chartHeight<200)return;
-   int availableTop=MathMax(440,chartWidth-LeftMargin-RightMargin-12);
-   int leftW=MathMin(MathMax(250,LeftPanelWidth),(availableTop-12)/2);
-   int rightW=MathMin(MathMax(250,RightPanelWidth),(availableTop-12)/2);
-   int leftH=MathMax(270,LeftPanelHeight),rightH=MathMax(270,RightPanelHeight);
-   int leftX=MathMax(0,LeftMargin),leftY=MathMax(0,TopMargin);
-   int rightX=MathMax(0,chartWidth-RightMargin-rightW),rightY=MathMax(0,TopMargin);
-   int bottomW=MathMin(MathMax(420,BottomPanelWidth),chartWidth-20);
-   int bottomH=MathMax(130,BottomPanelHeight);
-   int bottomX=MathMax(0,(chartWidth-bottomW)/2),bottomY=MathMax(0,chartHeight-bottomH-BottomMargin);
+   long cw=0,ch=0;ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,cw);ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,ch);
+   int chartW=(int)cw,chartH=(int)ch;if(chartW<600||chartH<400)return;
+   int leftW=(int)MathMin(MathMax(480,LeftPanelWidth),(chartW-LeftMargin-RightMargin-20)*0.55);
+   int rightW=(int)MathMin(MathMax(400,RightPanelWidth),(chartW-LeftMargin-RightMargin-20)*0.45);
+   int leftH=(int)MathMax(340,LeftPanelHeight),rightH=(int)MathMax(340,RightPanelHeight);
+   int leftX=LeftMargin,leftY=TopMargin,rightX=chartW-RightMargin-rightW,rightY=TopMargin;
+   int bottomW=(int)MathMin(MathMax(500,BottomPanelWidth),chartW-30),bottomH=(int)MathMax(190,BottomPanelHeight);
+   int equityReserve=ShowEquityCurve?EquityCurveY+EquityCurveHeight+12:0;
+   int bottomX=(chartW-bottomW)/2,bottomY=chartH-BottomMargin-equityReserve-bottomH;
+   int topBottom=TopMargin+(int)MathMax(leftH,rightH);
+   if(bottomY<topBottom+12)
+   {
+      int available=chartH-BottomMargin-equityReserve-topBottom-12;
+      bottomH=(int)MathMax(150,MathMin(bottomH,available));bottomY=topBottom+12;
+   }
 
    double spread=(Ask-Bid)/Point,floating=0;int openTrades=UIOpenTrades(floating);
    double today=TodayClosedPL(),marginLevel=AccountMargin()>0?AccountEquity()/AccountMargin()*100.0:0;
    bool marketOpen=MarketInfo(Symbol(),MODE_TRADEALLOWED)>0&&Bid>0&&Ask>0;
-   bool tradeSafe=marketOpen&&SessionAllowed()&&!DailyLossReached()&&CurrentConsecutiveLosses()<MaximumConsecutiveLosses;
-
-   if(ShowLeftPanel)
-   {
-      CreatePanel("LEFT",leftX,leftY,leftW,leftH);CreateHeader("LEFT",leftX,leftY,leftW,"SIGNAL FORGE PRO","GENERAL / MARKET STATUS");
-      CreateStatusIndicator("LEFT_RUN",leftX+leftW-100,leftY+17,tradeSafe?"RUNNING":"PAUSED",tradeSafe?ProfitColor:WarningColor);
-      int y=leftY+54,half=(leftW-32)/2;
-      CreateValueLabel("LEFT_SYMBOL",leftX+15,y,"SYMBOL",Symbol(),TextColor);CreateValueLabel("LEFT_TF",leftX+20+half,y,"TIMEFRAME",CurrentTimeframeText(),AccentColor);y+=36;
-      CreateValueLabel("LEFT_BID",leftX+15,y,"CURRENT BID",DoubleToString(Bid,Digits),TextColor);CreateValueLabel("LEFT_ASK",leftX+20+half,y,"CURRENT ASK",DoubleToString(Ask,Digits),TextColor);y+=36;
-      CreateValueLabel("LEFT_SPREAD",leftX+15,y,"SPREAD",DoubleToString(spread,1)+" pts",spread<=MaximumSpreadPoints?ProfitColor:WarningColor);
-      CreateValueLabel("LEFT_MARKET",leftX+20+half,y,"MARKET",marketOpen?"OPEN":"CLOSED",marketOpen?ProfitColor:LossColor);y+=36;
-      CreateValueLabel("LEFT_TRADE",leftX+15,y,"TRADING STATUS",tradeSafe?"ALLOWED":"BLOCKED",tradeSafe?ProfitColor:WarningColor);
-      CreateValueLabel("LEFT_SESSION",leftX+20+half,y,"SESSION",CurrentSessionText(),TextColor);y+=36;
-      CreateValueLabel("LEFT_SERVER",leftX+15,y,"SERVER TIME",TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),TextColor);
-      CreateValueLabel("LEFT_LOCAL",leftX+20+half,y,"LOCAL TIME",TimeToString(TimeLocal(),TIME_DATE|TIME_SECONDS),TextColor);y+=36;
-      CreateValueLabel("LEFT_PERMIT",leftX+15,y,"BUY / SELL",IsTradeAllowed()?"ENABLED":"DISABLED",IsTradeAllowed()?ProfitColor:WarningColor);
-      CreateValueLabel("LEFT_STATUS",leftX+20+half,y,"EA STATUS",tradeSafe?"ACTIVE":"WARNING",tradeSafe?AccentColor:WarningColor);
-   }
-   else ObjectsDeleteAll(0,PREFIX+"UI_LEFT");
-
-   int activeType=-1,activeTicket=ActiveTicket(activeType);double lot=FixedLots,sl=0,tp=0,entry=0,current=0,riskMoney=0,rr=0;
+   bool streakSafe=!StopTradingAfterConsecutiveLosses||MaximumConsecutiveLosses<=0||CurrentConsecutiveLosses()<MaximumConsecutiveLosses;
+   bool tradeSafe=marketOpen&&SessionAllowed()&&!DailyLossReached()&&streakSafe;
+   int activeType=-1,activeTicket=ActiveTicket(activeType);double lot=FixedLots,sl=0,tp=0,entry=0,current=Bid,riskMoney=0,rr=0,tradePL=0;datetime opened=0;
    if(activeTicket>0&&OrderSelect(activeTicket,SELECT_BY_TICKET,MODE_TRADES))
    {
-      lot=OrderLots();sl=OrderStopLoss();tp=OrderTakeProfit();entry=OrderOpenPrice();current=activeType==OP_BUY?Bid:Ask;
+      lot=OrderLots();sl=OrderStopLoss();tp=OrderTakeProfit();entry=OrderOpenPrice();opened=OrderOpenTime();current=activeType==OP_BUY?Bid:Ask;tradePL=OrderProfit()+OrderSwap()+OrderCommission();
       string riskKey="SFP.ISL."+IntegerToString(AccountNumber())+"."+IntegerToString(MagicNumber)+"."+IntegerToString(activeTicket);
       double initialSL=GlobalVariableCheck(riskKey)?GlobalVariableGet(riskKey):sl;riskMoney=MoneyRiskAtStop(lot,entry,initialSL);
       if(initialSL>0&&tp>0)rr=MathAbs(tp-entry)/MathAbs(entry-initialSL);
    }
-   double riskPct=AccountBalance()>0&&riskMoney>0?riskMoney/AccountBalance()*100.0:0;
+   UpdateTrackerCache();double profitFactor=gTrackerGrossLoss>0?gTrackerGrossProfit/gTrackerGrossLoss:(gTrackerGrossProfit>0?999:0);
+   double winRate=gTrackerTrades>0?100.0*gTrackerWins/gTrackerTrades:0;
+
+   if(ShowLeftPanel)
+   {
+      CreatePanel("LEFT",leftX,leftY,leftW,leftH);CreateHeader("LEFT",leftX,leftY,leftW,"SIGNAL FORGE PRO",Symbol()+"  •  "+CurrentTimeframeText());
+      UILabel("LEFT_DATE",leftX+leftW-105,leftY+10,TimeToString(TimeCurrent(),TIME_DATE),SecondaryTextColor,PanelFontSize-1);
+      CreateStatusIndicator("LEFT_RUN",leftX+leftW-105,leftY+27,tradeSafe?"EA RUNNING":"EA PAUSED",tradeSafe?ProfitColor:WarningColor);
+      int cardY=leftY+54,scoreW=(int)(leftW*0.35),marketW=(int)(leftW*0.29),indicatorW=leftW-scoreW-marketW-38;
+      UICard("LEFT_SCORE",leftX+12,cardY,scoreW,leftH-132);UICard("LEFT_MARKET",leftX+18+scoreW,cardY,marketW,leftH-132);UICard("LEFT_IND",leftX+24+scoreW+marketW,cardY,indicatorW,leftH-132);
+      int sx=leftX+25,sy=cardY+17,barW=scoreW-26;
+      UILabel("LEFT_BUYL",sx,sy,"BUY SCORE",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("LEFT_BUYV",sx+barW-55,sy,DoubleToString(gBuyScore,1)+" / "+DoubleToString(EnabledWeightTotal(),0),ProfitColor,PanelFontSize);
+      UIProgressBar("LEFT_BUYBAR",sx,sy+22,barW,gBuyScore,EnabledWeightTotal(),C'0,205,180');sy+=60;
+      UILabel("LEFT_SELLL",sx,sy,"SELL SCORE",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("LEFT_SELLV",sx+barW-55,sy,DoubleToString(gSellScore,1)+" / "+DoubleToString(EnabledWeightTotal(),0),LossColor,PanelFontSize);
+      UIProgressBar("LEFT_SELLBAR",sx,sy+22,barW,gSellScore,EnabledWeightTotal(),C'255,38,91');sy+=60;
+      UILabel("LEFT_CANDLEL",sx,sy,"CANDLE SCORE",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("LEFT_CANDLEV",sx+barW-42,sy,IntegerToString(gCandleScore)+" / 5",WarningColor,PanelFontSize);
+      UIProgressBar("LEFT_CANDLEBAR",sx,sy+22,barW,gCandleScore,5,WarningColor);
+      int mx=leftX+30+scoreW,my=cardY+14;UILabel("LEFT_MHEAD",mx,my,"MARKET INFO",TextColor,PanelFontSize,"Segoe UI Semibold");my+=25;
+      string ml[8]={"Bid","Ask","Spread","ATR (14)","Volume","Trend","Market","Session"};string mv[8];
+      mv[0]=DoubleToString(Bid,Digits);mv[1]=DoubleToString(Ask,Digits);mv[2]=DoubleToString(spread,1);mv[3]=DoubleToString(iATR(NULL,0,ATRLength,1),Digits);mv[4]=IntegerToString((int)Volume[0]);mv[5]=gBuyScore>gSellScore?"BULLISH":(gSellScore>gBuyScore?"BEARISH":"NEUTRAL");mv[6]=marketOpen?"OPEN":"CLOSED";mv[7]=UseTradingSession?CurrentSessionText():"ALL DAY";
+      for(int m=0;m<8;m++){UILabel("LEFT_ML"+IntegerToString(m),mx,my,ml[m],SecondaryTextColor,PanelFontSize-1);color vc=(m==5?(mv[m]=="BULLISH"?ProfitColor:(mv[m]=="BEARISH"?LossColor:NeutralColor)):(m==6?(marketOpen?ProfitColor:LossColor):TextColor));UILabel("LEFT_MV"+IntegerToString(m),mx+marketW-78,my,mv[m],vc,PanelFontSize);my+=22;}
+      int ix=leftX+36+scoreW+marketW,iy=cardY+14;UILabel("LEFT_IHEAD",ix,iy,"INDICATORS",TextColor,PanelFontSize,"Segoe UI Semibold");iy+=23;
+      string indicatorNames[11]={"SMA","RSI","MACD","Supertrend","Stochastic","Bollinger","EMA","AO","SAR","CCI","ADX"};
+      for(int q=0;q<11;q++){string state=gBull[q]?"UP":(gBear[q]?"DOWN":"-");color stateColor=gBull[q]?ProfitColor:(gBear[q]?LossColor:NeutralColor);UILabel("LEFT_IN"+IntegerToString(q),ix,iy,indicatorNames[q],SecondaryTextColor,PanelFontSize-1);UILabel("LEFT_IS"+IntegerToString(q),ix+indicatorW-46,iy,state,stateColor,PanelFontSize-1,"Segoe UI Semibold");iy+=17;}
+      int stateY=leftY+leftH-66;UICard("LEFT_STATECARD",leftX+12,stateY,leftW-24,52);
+      string signal=gLongSignal?"BUY SIGNAL":(gShortSignal?"SELL SIGNAL":"NO SIGNAL");color signalColor=gLongSignal?ProfitColor:(gShortSignal?LossColor:AccentColor);
+      UILabel("LEFT_SIGNAL",leftX+34,stateY+13,signal,signalColor,ValueFontSize+5,"Segoe UI Semibold");UILabel("LEFT_WAIT",leftX+220,stateY+18,gLongSignal||gShortSignal?"Valid closed-candle setup":"Waiting for a valid setup...",SecondaryTextColor,PanelFontSize);
+   }
+   else ObjectsDeleteAll(0,PREFIX+"UI_LEFT");
+
    if(ShowRightPanel)
    {
-      CreateRightPanel("RIGHT",RightMargin,rightX,rightY,rightW,rightH);CreateHeader("RIGHT",rightX,rightY,rightW,"ACCOUNT & RISK","LIVE TRADE PROTECTION");
-      CreateStatusIndicator("RIGHT_STATE",rightX+rightW-105,rightY+17,floating>0?"PROFIT":(floating<0?"LOSS":"SAFE"),floating>0?ProfitColor:(floating<0?LossColor:AccentColor));
-      int y=rightY+54,half=(rightW-32)/2;
-      CreateValueLabel("RIGHT_BAL",rightX+15,y,"BALANCE",DoubleToString(AccountBalance(),2),TextColor);CreateValueLabel("RIGHT_EQ",rightX+20+half,y,"EQUITY",DoubleToString(AccountEquity(),2),floating>=0?ProfitColor:LossColor);y+=36;
-      CreateValueLabel("RIGHT_FREE",rightX+15,y,"FREE MARGIN",DoubleToString(AccountFreeMargin(),2),TextColor);CreateValueLabel("RIGHT_MLVL",rightX+20+half,y,"MARGIN LEVEL",AccountMargin()>0?DoubleToString(marginLevel,1)+"%":"N/A",marginLevel>150||AccountMargin()==0?ProfitColor:WarningColor);y+=36;
-      CreateValueLabel("RIGHT_FLOAT",rightX+15,y,"FLOATING P/L",SignedValue(floating,2),floating>=0?ProfitColor:LossColor);CreateValueLabel("RIGHT_DAY",rightX+20+half,y,"TODAY'S P/L",SignedValue(today,2),today>=0?ProfitColor:LossColor);y+=36;
-      CreateValueLabel("RIGHT_OPEN",rightX+15,y,"OPEN TRADES",IntegerToString(openTrades),openTrades>0?AccentColor:NeutralColor);CreateValueLabel("RIGHT_LOT",rightX+20+half,y,"LOT SIZE",DoubleToString(lot,LotPrecision()),TextColor);y+=36;
-      CreateValueLabel("RIGHT_RISK",rightX+15,y,"RISK",DoubleToString(riskMoney,2)+" / "+DoubleToString(riskPct,2)+"%",riskMoney<=MaximumRiskPerTradeMoney?ProfitColor:WarningColor);CreateValueLabel("RIGHT_RR",rightX+20+half,y,"RISK / REWARD",rr>0?"1 : "+DoubleToString(rr,2):"N/A",TextColor);y+=36;
-      CreateValueLabel("RIGHT_SL",rightX+15,y,"CURRENT SL",sl>0?DoubleToString(sl,Digits):"-",LossColor);CreateValueLabel("RIGHT_TP",rightX+20+half,y,"CURRENT TP",tp>0?DoubleToString(tp,Digits):"-",ProfitColor);y+=36;
-      string dailyStatus=DailyLossReached()?"LIMIT REACHED":(today>=0?"SAFE / PROFIT":"CONTROLLED LOSS");
-      CreateValueLabel("RIGHT_MAX",rightX+15,y,"MAX LOSS",DoubleToString(MaximumRiskPerTradeMoney,2),WarningColor);CreateValueLabel("RIGHT_DSTAT",rightX+20+half,y,"DAILY STATUS",dailyStatus,DailyLossReached()?LossColor:(today>=0?ProfitColor:WarningColor));
+      CreateRightPanel("RIGHT",RightMargin,rightX,rightY,rightW,rightH);CreateHeader("RIGHT",rightX,rightY,rightW,"ACCOUNT & PERFORMANCE","RISK CONTROL / STATISTICS");
+      CreateStatusIndicator("RIGHT_LIVE",rightX+rightW-70,rightY+18,"LIVE",ProfitColor);
+      int gap=8,inner=rightW-24,half=(inner-gap)/2,top=rightY+54;
+      UICard("RIGHT_ACCOUNT",rightX+12,top,half,112);UICard("RIGHT_RISK",rightX+12+half+gap,top,half,112);
+      int ax=rightX+24,ay=top+12;UILabel("RIGHT_AHEAD",ax,ay,"ACCOUNT",TextColor,PanelFontSize,"Segoe UI Semibold");ay+=24;
+      string al[4]={"Balance","Equity","Free Margin","Margin Level"};string av[4];av[0]=DoubleToString(AccountBalance(),2);av[1]=DoubleToString(AccountEquity(),2);av[2]=DoubleToString(AccountFreeMargin(),2);av[3]=AccountMargin()>0?DoubleToString(marginLevel,1)+"%":"N/A";
+      for(int a=0;a<4;a++){UILabel("RIGHT_AL"+IntegerToString(a),ax,ay,al[a],SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_AV"+IntegerToString(a),ax+half-90,ay,av[a],a==1?(floating>=0?ProfitColor:LossColor):TextColor,PanelFontSize);ay+=18;}
+      int rx=rightX+24+half+gap,ry=top+12;UILabel("RIGHT_RHEAD",rx,ry,"RISK CONTROL",TextColor,PanelFontSize,"Segoe UI Semibold");ry+=24;
+      double riskPct=AccountBalance()>0&&riskMoney>0?riskMoney/AccountBalance()*100.0:0;
+      UILabel("RIGHT_RL0",rx,ry,"Trade Risk",SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_RV0",rx+half-75,ry,DoubleToString(riskPct,2)+"%",riskPct<2?ProfitColor:WarningColor,PanelFontSize);ry+=18;
+      UILabel("RIGHT_RL1",rx,ry,"Max Risk",SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_RV1",rx+half-75,ry,"$"+DoubleToString(MaximumRiskPerTradeMoney,2),TextColor,PanelFontSize);ry+=18;
+      UILabel("RIGHT_RL2",rx,ry,"Consec. Losses",SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_RV2",rx+half-75,ry,IntegerToString(CurrentConsecutiveLosses())+" / "+IntegerToString(MaximumConsecutiveLosses),CurrentConsecutiveLosses()>=MaximumConsecutiveLosses?LossColor:TextColor,PanelFontSize);ry+=18;
+      UILabel("RIGHT_RL3",rx,ry,"Stop Trading",SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_RV3",rx+half-75,ry,DailyLossReached()?"ON":"OFF",DailyLossReached()?LossColor:NeutralColor,PanelFontSize);
+      int middle=top+120,statsH=142;UICard("RIGHT_STATS",rightX+12,middle,half,statsH);UICard("RIGHT_DAILY",rightX+12+half+gap,middle,half,78);UICard("RIGHT_HOURS",rightX+12+half+gap,middle+86,half,56);
+      int tx=rightX+24,ty=middle+12;UILabel("RIGHT_SHEAD",tx,ty,"STATISTICS",TextColor,PanelFontSize,"Segoe UI Semibold");ty+=23;
+      string tl[6]={"Total Trades","Win Rate","Profit Factor","Net Profit","Avg Win","Avg Loss"};string tv[6];tv[0]=IntegerToString(gTrackerTrades);tv[1]=DoubleToString(winRate,1)+"%";tv[2]=DoubleToString(profitFactor,2);tv[3]=SignedValue(gTrackerTotal,2);tv[4]=gTrackerWins>0?"+"+DoubleToString(gTrackerGrossProfit/gTrackerWins,2):"0.00";int losses=gTrackerTrades-gTrackerWins;tv[5]=losses>0?"-"+DoubleToString(gTrackerGrossLoss/losses,2):"0.00";
+      for(int t=0;t<6;t++){UILabel("RIGHT_TL"+IntegerToString(t),tx,ty,tl[t],SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_TV"+IntegerToString(t),tx+half-90,ty,tv[t],t==3?(gTrackerTotal>=0?ProfitColor:LossColor):(t==4?ProfitColor:(t==5?LossColor:TextColor)),PanelFontSize);ty+=17;}
+      int dx=rightX+24+half+gap,dy=middle+12;UILabel("RIGHT_DHEAD",dx,dy,"DAILY",TextColor,PanelFontSize,"Segoe UI Semibold");dy+=22;UILabel("RIGHT_DPL",dx,dy,"Daily P/L",SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_DPV",dx+half-82,dy,SignedValue(today,2),today>=0?ProfitColor:LossColor,PanelFontSize);dy+=19;UIProgressBar("RIGHT_DAYBAR",dx,dy,half-24,MathMax(0,today),MathMax(1,DailyProfitTargetDisplay),ProfitColor);
+      int hx=rightX+24+half+gap,hy=middle+98;UILabel("RIGHT_HHEAD",hx,hy,"TRADING HOURS",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("RIGHT_HVAL",hx,hy+22,CurrentSessionText(),SecondaryTextColor,PanelFontSize);
+      int riskY=rightY+rightH-57;UICard("RIGHT_RISKBAR",rightX+12,riskY,rightW-24,43);UILabel("RIGHT_RISKLEVEL",rightX+24,riskY+8,"RISK LEVEL",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("RIGHT_RISKPCT",rightX+rightW-65,riskY+8,DoubleToString(riskPct,2)+"%",riskPct<2?ProfitColor:WarningColor,PanelFontSize);UIProgressBar("RIGHT_LEVELBAR",rightX+24,riskY+26,rightW-48,riskPct,MathMax(2,MaximumDailyLossPercent),riskPct<2?ProfitColor:WarningColor);
    }
    else ObjectsDeleteAll(0,PREFIX+"UI_RIGHT");
 
    if(ShowBottomPanel)
    {
-      CreatePanel("BOTTOM",bottomX,bottomY,bottomW,bottomH);CreateHeader("BOTTOM",bottomX,bottomY,bottomW,"TRADE MANAGEMENT","SIGNAL / POSITION CONTROL");
-      string signal=gLongSignal?"BUY":(gShortSignal?"SELL":"WAIT");string position=activeTicket>0?(activeType==OP_BUY?"BUY ACTIVE":"SELL ACTIVE"):"FLAT";
-      string mainState=activeTicket>0?position:"WAITING FOR SIGNAL";color stateColor=activeTicket>0?(activeType==OP_BUY?ProfitColor:LossColor):NeutralColor;
-      UILabel("BOTTOM_MAIN",bottomX+15,bottomY+49,mainState,stateColor,ValueFontSize+5,"Segoe UI Semibold");
-      CreateStatusIndicator("BOTTOM_SIGNAL",bottomX+bottomW-122,bottomY+55,signal,signal=="BUY"?ProfitColor:(signal=="SELL"?LossColor:NeutralColor));
-      int col=(bottomW-30)/5,y=bottomY+82;
-      CreateValueLabel("BOTTOM_ENTRY",bottomX+15,y,"ENTRY",entry>0?DoubleToString(entry,Digits):"-",TextColor);
-      CreateValueLabel("BOTTOM_PRICE",bottomX+15+col,y,"CURRENT PRICE",DoubleToString(activeTicket>0?current:Bid,Digits),AccentColor);
-      CreateValueLabel("BOTTOM_SL",bottomX+15+col*2,y,"STOP LOSS",sl>0?DoubleToString(sl,Digits):"-",LossColor);
-      CreateValueLabel("BOTTOM_TP",bottomX+15+col*3,y,"TAKE PROFIT",tp>0?DoubleToString(tp,Digits):"-",ProfitColor);
-      CreateValueLabel("BOTTOM_PL",bottomX+15+col*4,y,"TRADE P/L",activeTicket>0?SignedValue(floating,2):"0.00",floating>=0?ProfitColor:LossColor);
-      y=bottomY+115;double slDistance=activeTicket>0&&sl>0?MathAbs(current-sl)/Point:0,tpDistance=activeTicket>0&&tp>0?MathAbs(tp-current)/Point:0;
-      UILabel("BOTTOM_META1",bottomX+15,y,"SL DIST  "+(slDistance>0?DoubleToString(slDistance,0)+" pts":"-"),SecondaryTextColor,PanelFontSize);
-      UILabel("BOTTOM_META2",bottomX+15+bottomW/5,y,"TP DIST  "+(tpDistance>0?DoubleToString(tpDistance,0)+" pts":"-"),SecondaryTextColor,PanelFontSize);
-      UILabel("BOTTOM_META3",bottomX+15+bottomW*2/5,y,"TRAIL  "+(EnableTrailingStop?"ARMED":"OFF"),EnableTrailingStop?AccentColor:NeutralColor,PanelFontSize);
-      UILabel("BOTTOM_META4",bottomX+15+bottomW*3/5,y,"B/E  "+(UseBreakEven?"ARMED":"OFF"),UseBreakEven?AccentColor:NeutralColor,PanelFontSize);
-      UILabel("BOTTOM_META5",bottomX+15+bottomW*4/5,y,"TP1 / TP2  N/A",SecondaryTextColor,PanelFontSize);
+      CreatePanel("BOTTOM",bottomX,bottomY,bottomW,bottomH);CreateHeader("BOTTOM",bottomX,bottomY,bottomW,"ACTIVE POSITION","TRADE MANAGEMENT");
+      CreateStatusIndicator("BOTTOM_MANAGED",bottomX+bottomW-100,bottomY+18,activeTicket>0?"MANAGED":"WAITING",activeTicket>0?ProfitColor:NeutralColor);
+      int contentY=bottomY+50,leftCardW=(int)(bottomW*0.50),rightCardW=bottomW-leftCardW-32;
+      UICard("BOTTOM_POSITION",bottomX+12,contentY,leftCardW,bottomH-96);UICard("BOTTOM_PROFIT",bottomX+20+leftCardW,contentY,rightCardW,bottomH-96);
+      string side=activeTicket>0?(activeType==OP_BUY?"BUY":"SELL"):"WAITING FOR SIGNAL";color sideColor=activeTicket>0?(activeType==OP_BUY?ProfitColor:LossColor):AccentColor;
+      UILabel("BOTTOM_SIDE",bottomX+28,contentY+12,side,sideColor,ValueFontSize+6,"Segoe UI Semibold");
+      int py=contentY+42;string pl[3]={"Entry","SL","TP"};string pv[3];pv[0]=entry>0?DoubleToString(entry,Digits):"-";pv[1]=sl>0?DoubleToString(sl,Digits):"-";pv[2]=tp>0?DoubleToString(tp,Digits):"-";
+      for(int p=0;p<3;p++){UILabel("BOTTOM_PL"+IntegerToString(p),bottomX+28,py,pl[p],SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_PV"+IntegerToString(p),bottomX+leftCardW-95,py,pv[p],p==1?LossColor:(p==2?ProfitColor:TextColor),ValueFontSize);py+=21;}
+      int px=bottomX+32+leftCardW;UILabel("BOTTOM_CURPL",px,contentY+13,"CURRENT P/L",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_CURPV",px+rightCardW-105,contentY+10,activeTicket>0?SignedValue(tradePL,2):"0.00",tradePL>=0?ProfitColor:LossColor,ValueFontSize+5,"Segoe UI Semibold");
+      double riskPct=AccountBalance()>0&&riskMoney>0?riskMoney/AccountBalance()*100.0:0;int infoY=contentY+47;
+      UILabel("BOTTOM_RISK",px,infoY,"Risk",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_RISKV",px+rightCardW-80,infoY,"$"+DoubleToString(riskMoney,2),TextColor,ValueFontSize);infoY+=22;
+      UILabel("BOTTOM_RP",px,infoY,"Risk %",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_RPV",px+rightCardW-80,infoY,DoubleToString(riskPct,2)+"%",TextColor,ValueFontSize);infoY+=22;
+      UILabel("BOTTOM_RR",px,infoY,"R:R",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_RRV",px+rightCardW-80,infoY,rr>0?DoubleToString(rr,2):"-",TextColor,ValueFontSize);
+      int lineY=bottomY+bottomH-77;UILabel("BOTTOM_SLL",bottomX+18,lineY,"SL  "+(sl>0?DoubleToString(sl,Digits):"-"),LossColor,PanelFontSize);UILabel("BOTTOM_ENTRYL",bottomX+bottomW/2-45,lineY,"ENTRY  "+(entry>0?DoubleToString(entry,Digits):"-"),TextColor,PanelFontSize);UILabel("BOTTOM_TPL",bottomX+bottomW-135,lineY,"TP  "+(tp>0?DoubleToString(tp,Digits):"-"),ProfitColor,PanelFontSize);
+      UIRect("BOTTOM_RANGE",bottomX+20,lineY+21,bottomW-40,8,C'16,58,92',C'21,82,145');
+      double range=(sl>0&&tp>0)?MathAbs(tp-sl):0,progress=range>0?(current-MathMin(sl,tp))/range:0;progress=activeType==OP_SELL?1-progress:progress;
+      UIRect("BOTTOM_PROGRESS",bottomX+20,lineY+21,(int)MathMax(2,(bottomW-40)*MathMax(0,MathMin(1,progress))),8,activeType==OP_SELL?LossColor:ProfitColor,activeType==OP_SELL?LossColor:ProfitColor);
+      int footerY=bottomY+bottomH-39,col=(bottomW-24)/4;
+      UICard("BOTTOM_BE",bottomX+12,footerY,col-6,28);UICard("BOTTOM_TRAIL",bottomX+12+col,footerY,col-6,28);UICard("BOTTOM_DIST",bottomX+12+col*2,footerY,col-6,28);UICard("BOTTOM_TIME",bottomX+12+col*3,footerY,col-6,28);
+      double slDistance=activeTicket>0&&sl>0?MathAbs(current-sl)/Point:0;
+      UILabel("BOTTOM_BEV",bottomX+20,footerY+7,"BREAK-EVEN  "+(UseBreakEven?"ON":"OFF"),UseBreakEven?ProfitColor:NeutralColor,PanelFontSize);
+      UILabel("BOTTOM_TRV",bottomX+20+col,footerY+7,"TRAILING  "+(EnableTrailingStop?"ON":"OFF"),EnableTrailingStop?ProfitColor:NeutralColor,PanelFontSize);
+      UILabel("BOTTOM_DSV",bottomX+20+col*2,footerY+7,"SL DIST  "+(slDistance>0?DoubleToString(slDistance,0)+" pts":"-"),TextColor,PanelFontSize);
+      UILabel("BOTTOM_TMV",bottomX+20+col*3,footerY+7,"DURATION  "+UIDuration(opened),TextColor,PanelFontSize);
    }
    else ObjectsDeleteAll(0,PREFIX+"UI_BOTTOM");
    ChartRedraw(0);
