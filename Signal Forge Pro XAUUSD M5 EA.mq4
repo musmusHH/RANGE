@@ -140,7 +140,8 @@ input int  LeftMargin = 15;
 input int  RightMargin = 15;
 input int  TopMargin = 20;
 input int  BottomMargin = 20;
-input int  BottomPanelGapAboveEquity = 24;
+input int  PositionPanelStackGap = 10;
+input int  EquityPositionGap = 10;
 input int  PanelFontSize = 8;
 input int  ValueFontSize = 9;
 input double DailyProfitTargetDisplay = 30.0; // dashboard reference only; does not affect trading
@@ -228,6 +229,17 @@ double gTrackerDaily=0,gTrackerWeekly=0,gTrackerMonthly=0,gTrackerTotal=0;
 double gTrackerDayProfit[5],gTrackerDayLots[5];
 string FILTER_BUTTON_NAME="SF_EA_SIG_FILTER_BUTTON";
 string gBuyOrbResource="",gSellOrbResource="";
+
+int ResponsiveRightPanelWidth(int chartWidth)
+{
+   int available=chartWidth-LeftMargin-RightMargin-20;
+   return (int)MathMin(MathMax(400,RightPanelWidth),available*0.45);
+}
+
+int ResponsiveRightPanelLeft(int chartWidth)
+{
+   return chartWidth-RightMargin-ResponsiveRightPanelWidth(chartWidth);
+}
 
 //+------------------------------------------------------------------+
 int CornerValue(EA_CORNER p)
@@ -1355,9 +1367,10 @@ void UpdateEquityCurve()
    ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartW);
    ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartH);
    // Match the Performance panel width to the 390 px Signal panel.
-   int performanceWidth=390;
-   int gap=10;
-   int width=(int)chartW-MathMax(0,EquityCurveX)-10-performanceWidth-gap;
+   int gap=(int)MathMax(1,EquityPositionGap);
+   // End the equity canvas before the right-side position stack. This keeps
+   // an exact horizontal gap and prevents either panel from covering it.
+   int width=ResponsiveRightPanelLeft((int)chartW)-gap-MathMax(0,EquityCurveX);
    int height=MathMax(90,EquityCurveHeight);
    int x=MathMax(0,EquityCurveX);
    int y=(int)chartH-MathMax(0,EquityCurveY)-height;
@@ -1775,29 +1788,15 @@ void UpdateDashboard()
    long cw=0,ch=0;ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,cw);ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,ch);
    int chartW=(int)cw,chartH=(int)ch;if(chartW<600||chartH<400)return;
    int leftW=(int)MathMin(MathMax(480,LeftPanelWidth),(chartW-LeftMargin-RightMargin-20)*0.55);
-   int rightW=(int)MathMin(MathMax(400,RightPanelWidth),(chartW-LeftMargin-RightMargin-20)*0.45);
+   int rightW=ResponsiveRightPanelWidth(chartW);
    int leftH=(int)MathMax(340,LeftPanelHeight),rightH=(int)MathMax(340,RightPanelHeight);
    int leftX=LeftMargin,leftY=TopMargin,rightX=chartW-RightMargin-rightW,rightY=TopMargin;
-   int bottomW=(int)MathMin(MathMax(500,BottomPanelWidth),chartW-30),bottomH=(int)MathMax(190,BottomPanelHeight);
-   int panelGap=(int)MathMax(8,BottomPanelGapAboveEquity);
-   // The equity canvas is bottom-anchored at EquityCurveY. Its exact screen
-   // top is therefore chartH-EquityCurveY-EquityCurveHeight. Treat that top
-   // edge as a hard limit: the management panel may never extend below it.
-   int lowerBoundary=ShowEquityCurve
-                     ?chartH-MathMax(0,EquityCurveY)-MathMax(1,EquityCurveHeight)-panelGap
-                     :chartH-MathMax(0,BottomMargin);
-   if(bottomH>lowerBoundary)bottomH=(int)MathMax(1,lowerBoundary);
-   int bottomX=(chartW-bottomW)/2,bottomY=lowerBoundary-bottomH;
-   int topBottom=TopMargin+(int)MathMax(leftH,rightH);
-   int availableBetween=lowerBoundary-(topBottom+12);
-   if(bottomY<topBottom+12 && availableBetween>=150)
-   {
-      // On a shorter chart compact the panel into the available vertical
-      // lane, but preserve the hard no-overlap boundary above equity.
-      bottomH=(int)MathMin(bottomH,availableBetween);
-      bottomY=lowerBoundary-bottomH;
-   }
-   bottomY=(int)MathMax(0,bottomY);
+   // Stack Active Position directly beneath Account & Performance. It uses
+   // exactly the same X coordinate and width, opening the chart center.
+   int stackGap=(int)MathMax(4,PositionPanelStackGap);
+   int bottomW=rightW,bottomX=rightX,bottomY=rightY+rightH+stackGap;
+   int remainingHeight=chartH-MathMax(4,BottomMargin)-bottomY;
+   int bottomH=(int)MathMin(MathMax(150,BottomPanelHeight),MathMax(110,remainingHeight));
 
    double spread=(Ask-Bid)/Point,floating=0;int openTrades=UIOpenTrades(floating);
    double today=TodayClosedPL(),marginLevel=AccountMargin()>0?AccountEquity()/AccountMargin()*100.0:0;
@@ -1871,28 +1870,27 @@ void UpdateDashboard()
    {
       CreatePanel("BOTTOM",bottomX,bottomY,bottomW,bottomH);CreateHeader("BOTTOM",bottomX,bottomY,bottomW,"ACTIVE POSITION","TRADE MANAGEMENT");
       CreateStatusIndicator("BOTTOM_MANAGED",bottomX+bottomW-100,bottomY+18,activeTicket>0?"MANAGED":"WAITING",activeTicket>0?ProfitColor:NeutralColor);
-      int contentY=bottomY+50,leftCardW=(int)(bottomW*0.50),rightCardW=bottomW-leftCardW-32;
-      UICard("BOTTOM_POSITION",bottomX+12,contentY,leftCardW,bottomH-96);UICard("BOTTOM_PROFIT",bottomX+20+leftCardW,contentY,rightCardW,bottomH-96);
+      int contentY=bottomY+48,leftCardW=(int)(bottomW*0.55),rightCardW=bottomW-leftCardW-32,cardH=(int)MathMax(54,MathMin(76,bottomH-113));
+      UICard("BOTTOM_POSITION",bottomX+12,contentY,leftCardW,cardH);UICard("BOTTOM_PROFIT",bottomX+20+leftCardW,contentY,rightCardW,cardH);
       string side=activeTicket>0?(activeType==OP_BUY?"BUY":"SELL"):"WAITING FOR SIGNAL";color sideColor=activeTicket>0?(activeType==OP_BUY?ProfitColor:LossColor):AccentColor;
-      UILabel("BOTTOM_SIDE",bottomX+28,contentY+12,side,sideColor,ValueFontSize+6,"Segoe UI Semibold");
-      int py=contentY+42;string pl[3]={"Entry","SL","TP"};string pv[3];pv[0]=entry>0?DoubleToString(entry,Digits):"-";pv[1]=sl>0?DoubleToString(sl,Digits):"-";pv[2]=tp>0?DoubleToString(tp,Digits):"-";
-      for(int p=0;p<3;p++){UILabel("BOTTOM_PL"+IntegerToString(p),bottomX+28,py,pl[p],SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_PV"+IntegerToString(p),bottomX+leftCardW-95,py,pv[p],p==1?LossColor:(p==2?ProfitColor:TextColor),ValueFontSize);py+=21;}
-      int px=bottomX+32+leftCardW;UILabel("BOTTOM_CURPL",px,contentY+13,"CURRENT P/L",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_CURPV",px+rightCardW-105,contentY+10,activeTicket>0?SignedValue(tradePL,2):"0.00",tradePL>=0?ProfitColor:LossColor,ValueFontSize+5,"Segoe UI Semibold");
-      double riskPct=AccountBalance()>0&&riskMoney>0?riskMoney/AccountBalance()*100.0:0;int infoY=contentY+47;
-      UILabel("BOTTOM_RISK",px,infoY,"Risk",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_RISKV",px+rightCardW-80,infoY,"$"+DoubleToString(riskMoney,2),TextColor,ValueFontSize);infoY+=22;
-      UILabel("BOTTOM_RP",px,infoY,"Risk %",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_RPV",px+rightCardW-80,infoY,DoubleToString(riskPct,2)+"%",TextColor,ValueFontSize);infoY+=22;
-      UILabel("BOTTOM_RR",px,infoY,"R:R",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_RRV",px+rightCardW-80,infoY,rr>0?DoubleToString(rr,2):"-",TextColor,ValueFontSize);
-      int lineY=bottomY+bottomH-77;UILabel("BOTTOM_SLL",bottomX+18,lineY,"SL  "+(sl>0?DoubleToString(sl,Digits):"-"),LossColor,PanelFontSize);UILabel("BOTTOM_ENTRYL",bottomX+bottomW/2-45,lineY,"ENTRY  "+(entry>0?DoubleToString(entry,Digits):"-"),TextColor,PanelFontSize);UILabel("BOTTOM_TPL",bottomX+bottomW-135,lineY,"TP  "+(tp>0?DoubleToString(tp,Digits):"-"),ProfitColor,PanelFontSize);
-      UIRect("BOTTOM_RANGE",bottomX+20,lineY+21,bottomW-40,8,C'16,58,92',C'21,82,145');
+      UILabel("BOTTOM_SIDE",bottomX+24,contentY+9,side,sideColor,ValueFontSize+3,"Segoe UI Semibold");
+      int levelY=contentY+36,levelCol=(leftCardW-24)/3;string pl[3]={"ENTRY","SL","TP"};string pv[3];pv[0]=entry>0?DoubleToString(entry,Digits):"-";pv[1]=sl>0?DoubleToString(sl,Digits):"-";pv[2]=tp>0?DoubleToString(tp,Digits):"-";
+      for(int p=0;p<3;p++){int lx=bottomX+24+p*levelCol;UILabel("BOTTOM_PL"+IntegerToString(p),lx,levelY,pl[p],SecondaryTextColor,PanelFontSize-1);UILabel("BOTTOM_PV"+IntegerToString(p),lx,levelY+13,pv[p],p==1?LossColor:(p==2?ProfitColor:TextColor),PanelFontSize);}
+      int px=bottomX+32+leftCardW;UILabel("BOTTOM_CURPL",px,contentY+9,"CURRENT P/L",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_CURPV",px+rightCardW-95,contentY+7,activeTicket>0?SignedValue(tradePL,2):"0.00",tradePL>=0?ProfitColor:LossColor,ValueFontSize+3,"Segoe UI Semibold");
+      double riskPct=AccountBalance()>0&&riskMoney>0?riskMoney/AccountBalance()*100.0:0;
+      UILabel("BOTTOM_RISK",px,contentY+38,"RISK $"+DoubleToString(riskMoney,2),TextColor,PanelFontSize);UILabel("BOTTOM_RP",px+74,contentY+38,"RISK "+DoubleToString(riskPct,2)+"%",TextColor,PanelFontSize);UILabel("BOTTOM_RR",px+150,contentY+38,"R:R "+(rr>0?DoubleToString(rr,2):"-"),TextColor,PanelFontSize);
+      int lineY=contentY+cardH+6;
+      UILabel("BOTTOM_SLL",bottomX+16,lineY,"SL "+(sl>0?DoubleToString(sl,Digits):"-"),LossColor,PanelFontSize-1);UILabel("BOTTOM_ENTRYL",bottomX+bottomW/2-42,lineY,"ENTRY "+(entry>0?DoubleToString(entry,Digits):"-"),TextColor,PanelFontSize-1);UILabel("BOTTOM_TPL",bottomX+bottomW-120,lineY,"TP "+(tp>0?DoubleToString(tp,Digits):"-"),ProfitColor,PanelFontSize-1);
+      UIRect("BOTTOM_RANGE",bottomX+16,lineY+17,bottomW-32,7,C'16,58,92',C'21,82,145');
       double range=(sl>0&&tp>0)?MathAbs(tp-sl):0,progress=range>0?(current-MathMin(sl,tp))/range:0;progress=activeType==OP_SELL?1-progress:progress;
-      UIRect("BOTTOM_PROGRESS",bottomX+20,lineY+21,(int)MathMax(2,(bottomW-40)*MathMax(0,MathMin(1,progress))),8,activeType==OP_SELL?LossColor:ProfitColor,activeType==OP_SELL?LossColor:ProfitColor);
-      int footerY=bottomY+bottomH-39,col=(bottomW-24)/4;
-      UICard("BOTTOM_BE",bottomX+12,footerY,col-6,28);UICard("BOTTOM_TRAIL",bottomX+12+col,footerY,col-6,28);UICard("BOTTOM_DIST",bottomX+12+col*2,footerY,col-6,28);UICard("BOTTOM_TIME",bottomX+12+col*3,footerY,col-6,28);
+      UIRect("BOTTOM_PROGRESS",bottomX+16,lineY+17,(int)MathMax(2,(bottomW-32)*MathMax(0,MathMin(1,progress))),7,activeType==OP_SELL?LossColor:ProfitColor,activeType==OP_SELL?LossColor:ProfitColor);
+      int footerY=bottomY+bottomH-31,col=(bottomW-24)/4;
+      UICard("BOTTOM_BE",bottomX+12,footerY,col-6,24);UICard("BOTTOM_TRAIL",bottomX+12+col,footerY,col-6,24);UICard("BOTTOM_DIST",bottomX+12+col*2,footerY,col-6,24);UICard("BOTTOM_TIME",bottomX+12+col*3,footerY,col-6,24);
       double slDistance=activeTicket>0&&sl>0?MathAbs(current-sl)/Point:0;
-      UILabel("BOTTOM_BEV",bottomX+20,footerY+7,"BREAK-EVEN  "+(UseBreakEven?"ON":"OFF"),UseBreakEven?ProfitColor:NeutralColor,PanelFontSize);
-      UILabel("BOTTOM_TRV",bottomX+20+col,footerY+7,"TRAILING  "+(EnableTrailingStop?"ON":"OFF"),EnableTrailingStop?ProfitColor:NeutralColor,PanelFontSize);
-      UILabel("BOTTOM_DSV",bottomX+20+col*2,footerY+7,"SL DIST  "+(slDistance>0?DoubleToString(slDistance,0)+" pts":"-"),TextColor,PanelFontSize);
-      UILabel("BOTTOM_TMV",bottomX+20+col*3,footerY+7,"DURATION  "+UIDuration(opened),TextColor,PanelFontSize);
+      UILabel("BOTTOM_BEV",bottomX+18,footerY+5,"B/E "+(UseBreakEven?"ON":"OFF"),UseBreakEven?ProfitColor:NeutralColor,PanelFontSize-1);
+      UILabel("BOTTOM_TRV",bottomX+18+col,footerY+5,"TRAIL "+(EnableTrailingStop?"ON":"OFF"),EnableTrailingStop?ProfitColor:NeutralColor,PanelFontSize-1);
+      UILabel("BOTTOM_DSV",bottomX+18+col*2,footerY+5,"SL "+(slDistance>0?DoubleToString(slDistance,0)+" pts":"-"),TextColor,PanelFontSize-1);
+      UILabel("BOTTOM_TMV",bottomX+18+col*3,footerY+5,UIDuration(opened),TextColor,PanelFontSize-1);
    }
    else ObjectsDeleteAll(0,PREFIX+"UI_BOTTOM");
    ChartRedraw(0);
@@ -1915,8 +1913,8 @@ void DrawPersistentFinalEquityCurve()
 {
    ObjectsDeleteAll(0,PREFIX+"FINAL_EQ_");
    long chartW=0,chartH=0;ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartW);ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartH);
-   int performanceWidth=390,gap=10;
-   int width=(int)chartW-MathMax(0,EquityCurveX)-10-performanceWidth-gap;
+   int gap=(int)MathMax(1,EquityPositionGap);
+   int width=ResponsiveRightPanelLeft((int)chartW)-gap-MathMax(0,EquityCurveX);
    int height=MathMax(90,EquityCurveHeight),panelX=MathMax(0,EquityCurveX),panelY=MathMax(0,EquityCurveY);
    if(width<220)return;
    DrawPanel("FINAL_EQ",EA_Bottom_Left,panelX,panelY,width,height);
@@ -1954,7 +1952,9 @@ void DrawPersistentFinalEquityCurve()
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Remove a static snapshot left by a previous completed tester run.
+   // Remove stale UI objects from a previous preserved tester run, then create
+   // the current layout once with the latest responsive geometry.
+   DeletePanelObjects();
    ObjectsDeleteAll(0,PREFIX+"FINAL_EQ_");
    gBuyOrbResource="::SF_BUY_ORB_"+IntegerToString((int)ChartID());
    gSellOrbResource="::SF_SELL_ORB_"+IntegerToString((int)ChartID());
