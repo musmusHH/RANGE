@@ -127,8 +127,33 @@ enum EA_CORNER { EA_Top_Right=0, EA_Bottom_Right=1, EA_Bottom_Left=2, EA_Top_Lef
 enum FILTER_PANEL_MODE { Show_All_Filters=0, Show_Activated_Filters_Only=1 };
 input bool ApplyProfessionalChartTheme = true;
 input bool ShowDashboard = true;
+input bool ShowLeftPanel = true;
+input bool ShowRightPanel = true;
+input bool ShowBottomPanel = true;
+input int  LeftPanelWidth = 310;
+input int  LeftPanelHeight = 300;
+input int  RightPanelWidth = 310;
+input int  RightPanelHeight = 300;
+input int  BottomPanelWidth = 560;
+input int  BottomPanelHeight = 150;
+input int  LeftMargin = 15;
+input int  RightMargin = 15;
+input int  TopMargin = 20;
+input int  BottomMargin = 20;
+input int  PanelFontSize = 8;
+input int  ValueFontSize = 9;
+input color PanelBackground = C'11,16,32';
+input color PanelBorder = C'48,67,94';
+input color HeaderColor = C'17,31,52';
+input color TextColor = C'245,247,250';
+input color SecondaryTextColor = C'148,163,184';
+input color AccentColor = C'0,229,255';
+input color ProfitColor = C'0,230,118';
+input color LossColor = C'255,82,82';
+input color WarningColor = C'255,193,7';
+input color NeutralColor = C'100,116,139';
 input bool KeepVisualsAfterBacktest = true;
-input bool ShowAccountProfitPanel = true;
+input bool ShowAccountProfitPanel = false; // legacy panel disabled by modern three-panel UI
 input int  AccountPanelX = 10;
 input int  AccountPanelY = 10;
 input EA_CORNER SignalPanelPosition = EA_Top_Right;
@@ -154,7 +179,7 @@ input int  SignalCircleSize = 16;
 input int  SignalCircleShadowSize = 1;
 input int  SignalLetterFontSize = 12;
 input int DashboardFontSize = 9;
-input bool ShowEquityCurve = true;
+input bool ShowEquityCurve = false; // legacy canvas disabled to keep the lower-center management panel clear
 input int  EquityCurveX = 10;
 input int  EquityCurveY = 10;
 input int  EquityCurveHeight = 126;
@@ -183,6 +208,7 @@ int gEquityChartHeight=0,gEquityHistoryTotal=-1;
 int gKnownResultHistory=-1;
 int gLastResultCleanupHistory=-1;
 bool gChartLayoutDirty=false;
+bool gLegacyDashboardCleared=false;
 uint gLastChartResultRefresh=0;
 // Incremental Supertrend cache: after one seed pass, only one bar is
 // calculated per new candle instead of replaying 600 bars twice.
@@ -1606,72 +1632,204 @@ void DrawAccountProfitPanel()
    ObjectSetString(0,PREFIX+"ACCOUNT_T_COUNT_TIME",OBJPROP_FONT,"Arial Black");
 }
 
+bool UIEnsureObject(string name,ENUM_OBJECT type)
+{
+   if(ObjectFind(0,name)>=0)return true;
+   ResetLastError();
+   if(!ObjectCreate(0,name,type,0,0,0))
+   {
+      Print("UI Object creation failed: ",name," Error=",GetLastError());
+      return false;
+   }
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,200);
+   return true;
+}
+
+void UIRect(string id,int x,int y,int width,int height,color background,color border)
+{
+   string name=PREFIX+"UI_"+id;if(!UIEnsureObject(name,OBJ_RECTANGLE_LABEL))return;
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,MathMax(0,x));ObjectSetInteger(0,name,OBJPROP_YDISTANCE,MathMax(0,y));
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,MathMax(1,width));ObjectSetInteger(0,name,OBJPROP_YSIZE,MathMax(1,height));
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,background);ObjectSetInteger(0,name,OBJPROP_COLOR,border);
+   ObjectSetInteger(0,name,OBJPROP_BORDER_TYPE,BORDER_FLAT);
+}
+
+void CreatePanel(string id,int x,int y,int width,int height)
+{
+   UIRect(id+"_SHADOW",x+3,y+3,width,height,C'4,7,14',C'4,7,14');
+   UIRect(id+"_PANEL",x,y,width,height,PanelBackground,PanelBorder);
+   UIRect(id+"_ACCENT",x,y,4,height,AccentColor,AccentColor);
+}
+
+void CreateRightPanel(string id,int rightDistance,int absoluteX,int y,int width,int height)
+{
+   string shadow=PREFIX+"UI_"+id+"_SHADOW",panel=PREFIX+"UI_"+id+"_PANEL";
+   if(UIEnsureObject(shadow,OBJ_RECTANGLE_LABEL))
+   {
+      ObjectSetInteger(0,shadow,OBJPROP_CORNER,CORNER_RIGHT_UPPER);ObjectSetInteger(0,shadow,OBJPROP_XDISTANCE,MathMax(0,rightDistance-3));ObjectSetInteger(0,shadow,OBJPROP_YDISTANCE,y+3);
+      ObjectSetInteger(0,shadow,OBJPROP_XSIZE,width);ObjectSetInteger(0,shadow,OBJPROP_YSIZE,height);ObjectSetInteger(0,shadow,OBJPROP_BGCOLOR,C'4,7,14');ObjectSetInteger(0,shadow,OBJPROP_COLOR,C'4,7,14');
+   }
+   if(UIEnsureObject(panel,OBJ_RECTANGLE_LABEL))
+   {
+      ObjectSetInteger(0,panel,OBJPROP_CORNER,CORNER_RIGHT_UPPER);ObjectSetInteger(0,panel,OBJPROP_XDISTANCE,rightDistance);ObjectSetInteger(0,panel,OBJPROP_YDISTANCE,y);
+      ObjectSetInteger(0,panel,OBJPROP_XSIZE,width);ObjectSetInteger(0,panel,OBJPROP_YSIZE,height);ObjectSetInteger(0,panel,OBJPROP_BGCOLOR,PanelBackground);ObjectSetInteger(0,panel,OBJPROP_COLOR,PanelBorder);ObjectSetInteger(0,panel,OBJPROP_BORDER_TYPE,BORDER_FLAT);
+   }
+   UIRect(id+"_ACCENT",absoluteX,y,4,height,AccentColor,AccentColor);
+}
+
+void UILabel(string id,int x,int y,string text,color clr,int size,string font="Segoe UI")
+{
+   string name=PREFIX+"UI_"+id;if(!UIEnsureObject(name,OBJ_LABEL))return;
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,MathMax(0,x));ObjectSetInteger(0,name,OBJPROP_YDISTANCE,MathMax(0,y));
+   ObjectSetString(0,name,OBJPROP_TEXT,text);ObjectSetString(0,name,OBJPROP_FONT,font);
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,MathMax(6,size));ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+}
+
+void CreateHeader(string panelId,int x,int y,int width,string title,string subtitle)
+{
+   UIRect(panelId+"_HEADER",x+5,y+5,width-10,38,HeaderColor,HeaderColor);
+   UILabel(panelId+"_TITLE",x+15,y+10,title,TextColor,PanelFontSize+2,"Segoe UI Semibold");
+   UILabel(panelId+"_SUB",x+15,y+26,subtitle,SecondaryTextColor,PanelFontSize-1);
+}
+
+void CreateStatusIndicator(string id,int x,int y,string status,color clr)
+{
+   UIRect(id+"_DOT",x,y+3,7,7,clr,clr);UILabel(id+"_TEXT",x+13,y,status,clr,PanelFontSize,"Segoe UI Semibold");
+}
+
+void CreateValueLabel(string id,int x,int y,string label,string value,color valueColor)
+{
+   UILabel(id+"_LABEL",x,y,label,SecondaryTextColor,PanelFontSize-1);
+   UILabel(id+"_VALUE",x,y+11,value,valueColor,ValueFontSize,"Segoe UI Semibold");
+}
+
+string CurrentSessionText()
+{
+   if(!UseTradingSession)return "ALL SESSIONS";
+   string start=StringFormat("%02d:%02d",SessionStartHour,SessionStartMinute);
+   string finish=StringFormat("%02d:%02d",SessionEndHour,SessionEndMinute);
+   return start+" - "+finish;
+}
+
+int UIOpenTrades(double &floating)
+{
+   int count=0;floating=0;
+   for(int i=OrdersTotal()-1;i>=0;i--)if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES))
+   {
+      if(OrderSymbol()!=Symbol()||OrderMagicNumber()!=MagicNumber||(OrderType()!=OP_BUY&&OrderType()!=OP_SELL))continue;
+      count++;floating+=OrderProfit()+OrderSwap()+OrderCommission();
+   }
+   return count;
+}
+
+void DeletePanelObjects()
+{
+   ObjectsDeleteAll(0,PREFIX+"UI_");
+}
+
 void UpdateDashboard()
 {
-   if(!ShowDashboard)
+   // Retire legacy dashboard objects once. Trade drawings, filter plots,
+   // signal markers and result cards use different names and remain untouched.
+   if(!gLegacyDashboardCleared)
    {
       ObjectsDeleteAll(0,PREFIX+"SIG_");ObjectsDeleteAll(0,PREFIX+"PERF_");ObjectsDeleteAll(0,PREFIX+"ACCOUNT_");
-      return;
+      gLegacyDashboardCleared=true;
    }
-   DrawAccountProfitPanel();
-   int fs=MathMax(7,DashboardFontSize);
-   string names[11]={"SMA CROSS","RSI","MACD","SUPERTREND","STOCHASTIC","BOLLINGER","EMA CROSS","AO","SAR","CCI","ADX FILTER"};
-   bool enabled[11];
-   enabled[0]=EnableSMA;enabled[1]=EnableRSI;enabled[2]=EnableMACD;enabled[3]=EnableSupertrend;enabled[4]=EnableStochastic;
-   enabled[5]=EnableBollinger;enabled[6]=EnableEMA;enabled[7]=EnableAO;enabled[8]=EnableSAR;enabled[9]=EnableCCI;enabled[10]=EnableADX;
-   int visibleCount=0;
-   for(int vc=0;vc<11;vc++) if(!gShowEnabledOnly || enabled[vc]) visibleCount++;
-   int x=10,y=10,w=390,h=94+visibleCount*22;
-   DrawPanel("SIG",SignalPanelPosition,x,y,w,h);
-   DrawCell("SIG","TITLE",SignalPanelPosition,x,y,w,h,6,6,270,28,"SIGNAL FORGE EA | "+Symbol(),C'255,255,255',C'82,55,210',fs+1);
-   DrawFilterToggle(SignalPanelPosition,x,y,w,h,276,6,108,28);
-   DrawCell("SIG","H0",SignalPanelPosition,x,y,w,h,6,36,120,22,"INDICATOR",C'120,210,255',C'28,48,88',fs);
-   DrawCell("SIG","H1",SignalPanelPosition,x,y,w,h,126,36,100,22,"STATUS",C'120,210,255',C'28,48,88',fs);
-   DrawCell("SIG","H2",SignalPanelPosition,x,y,w,h,226,36,70,22,"ACTIVE",C'120,210,255',C'28,48,88',fs-1);
-   DrawCell("SIG","H3",SignalPanelPosition,x,y,w,h,296,36,88,22,"CHART",C'120,210,255',C'28,48,88',fs-1);
-   int slot=0;
-   for(int i=0;i<11;i++)
-   {
-      string id=IntegerToString(i);
-      if(gShowEnabledOnly && !enabled[i]) { DeleteSignalRow(id); continue; }
-      int top=60+slot*22; slot++;
-      color sc=StatusColor(gBull[i],gBear[i]);
-      color sb=gBull[i]?C'0,72,58':(gBear[i]?C'92,18,36':C'65,55,20');
-      DrawCell("SIG","N"+id,SignalPanelPosition,x,y,w,h,6,top,120,21,names[i],C'235,240,255',C'22,30,48',fs-1);
-      DrawCell("SIG","S"+id,SignalPanelPosition,x,y,w,h,126,top,100,21,StatusText(gBull[i],gBear[i]),sc,sb,fs-1);
-      DrawCell("SIG","E"+id,SignalPanelPosition,x,y,w,h,226,top,70,21,enabled[i]?"ON":"OFF",enabled[i]?C'0,255,170':C'255,64,96',enabled[i]?C'0,72,58':C'92,18,36',fs-1);
-      DrawPerFilterButton(i,SignalPanelPosition,x,y,w,h,296,top,88,21);
-   }
-   string signal=gLongSignal?"LONG":(gShortSignal?"SHORT":"NEUTRAL");
-   color sigc=gLongSignal?C'0,255,170':(gShortSignal?C'255,64,96':C'255,214,64');
-   color sigb=gLongSignal?C'0,72,58':(gShortSignal?C'92,18,36':C'72,58,18');
-   string scoreText="CURRENT SIGNAL: "+signal+" | B "+DoubleToString(gBuyScore,1)+" S "+DoubleToString(gSellScore,1)+" C "+IntegerToString(gCandleScore);
-   DrawCell("SIG","SIGNAL",SignalPanelPosition,x,y,w,h,6,60+visibleCount*22,378,28,scoreText,sigc,sigb,fs);
+   if(!ShowDashboard){DeletePanelObjects();return;}
 
-   int trades,wins,losses;double net;HistoryStats(trades,wins,losses,net);
-   double wr=trades>0?100.0*wins/trades:0;
-   int type;int ticket=ActiveTicket(type);
-   string position=ticket<0?"FLAT":(type==OP_BUY?"BUY #":"SELL #")+IntegerToString(ticket);
-   int qx=10,qy=10,qw=390,qh=126;
-   DrawPanel("PERF",PerformancePanelPosition,qx,qy,qw,qh);
-   DrawCell("PERF","TITLE",PerformancePanelPosition,qx,qy,qw,qh,6,6,378,28,"EA PERFORMANCE | CLOSED ORDERS",C'255,255,255',C'0,105,160',fs+1);
-   string heads[5]={"TRADES","WINS","LOSSES","WIN RATE","NET"};
-   string vals[5]; vals[0]=IntegerToString(trades);vals[1]=IntegerToString(wins);vals[2]=IntegerToString(losses);vals[3]=DoubleToString(wr,1)+"%";vals[4]=DoubleToString(net,2);
-   int widths[5]={66,58,58,88,108};
-   color cols[5];cols[0]=C'120,210,255';cols[1]=C'0,255,170';cols[2]=C'255,64,96';cols[3]=(wr>=50)?C'0,255,170':C'255,64,96';cols[4]=(net>0)?C'0,255,170':(net<0?C'255,64,96':C'220,225,235');
-   int left=6;
-   for(int p=0;p<5;p++)
+   long chartWidthLong=0,chartHeightLong=0;
+   ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartWidthLong);ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartHeightLong);
+   int chartWidth=(int)chartWidthLong,chartHeight=(int)chartHeightLong;
+   if(chartWidth<200||chartHeight<200)return;
+   int availableTop=MathMax(440,chartWidth-LeftMargin-RightMargin-12);
+   int leftW=MathMin(MathMax(250,LeftPanelWidth),(availableTop-12)/2);
+   int rightW=MathMin(MathMax(250,RightPanelWidth),(availableTop-12)/2);
+   int leftH=MathMax(270,LeftPanelHeight),rightH=MathMax(270,RightPanelHeight);
+   int leftX=MathMax(0,LeftMargin),leftY=MathMax(0,TopMargin);
+   int rightX=MathMax(0,chartWidth-RightMargin-rightW),rightY=MathMax(0,TopMargin);
+   int bottomW=MathMin(MathMax(420,BottomPanelWidth),chartWidth-20);
+   int bottomH=MathMax(130,BottomPanelHeight);
+   int bottomX=MathMax(0,(chartWidth-bottomW)/2),bottomY=MathMax(0,chartHeight-bottomH-BottomMargin);
+
+   double spread=(Ask-Bid)/Point,floating=0;int openTrades=UIOpenTrades(floating);
+   double today=TodayClosedPL(),marginLevel=AccountMargin()>0?AccountEquity()/AccountMargin()*100.0:0;
+   bool marketOpen=MarketInfo(Symbol(),MODE_TRADEALLOWED)>0&&Bid>0&&Ask>0;
+   bool tradeSafe=marketOpen&&SessionAllowed()&&!DailyLossReached()&&CurrentConsecutiveLosses()<MaximumConsecutiveLosses;
+
+   if(ShowLeftPanel)
    {
-      string id=IntegerToString(p);
-      DrawCell("PERF","H"+id,PerformancePanelPosition,qx,qy,qw,qh,left,36,widths[p],22,heads[p],C'120,210,255',C'28,48,88',fs);
-      color bg=(p==1 || (p==3&&wr>=50) || (p==4&&net>0))?C'0,72,58':((p==2 || (p==3&&trades>0&&wr<50) || (p==4&&net<0))?C'92,18,36':C'42,49,65');
-      DrawCell("PERF","V"+id,PerformancePanelPosition,qx,qy,qw,qh,left,59,widths[p],31,vals[p],cols[p],bg,fs+1);
-      left+=widths[p];
+      CreatePanel("LEFT",leftX,leftY,leftW,leftH);CreateHeader("LEFT",leftX,leftY,leftW,"SIGNAL FORGE PRO","GENERAL / MARKET STATUS");
+      CreateStatusIndicator("LEFT_RUN",leftX+leftW-100,leftY+17,tradeSafe?"RUNNING":"PAUSED",tradeSafe?ProfitColor:WarningColor);
+      int y=leftY+54,half=(leftW-32)/2;
+      CreateValueLabel("LEFT_SYMBOL",leftX+15,y,"SYMBOL",Symbol(),TextColor);CreateValueLabel("LEFT_TF",leftX+20+half,y,"TIMEFRAME",CurrentTimeframeText(),AccentColor);y+=36;
+      CreateValueLabel("LEFT_BID",leftX+15,y,"CURRENT BID",DoubleToString(Bid,Digits),TextColor);CreateValueLabel("LEFT_ASK",leftX+20+half,y,"CURRENT ASK",DoubleToString(Ask,Digits),TextColor);y+=36;
+      CreateValueLabel("LEFT_SPREAD",leftX+15,y,"SPREAD",DoubleToString(spread,1)+" pts",spread<=MaximumSpreadPoints?ProfitColor:WarningColor);
+      CreateValueLabel("LEFT_MARKET",leftX+20+half,y,"MARKET",marketOpen?"OPEN":"CLOSED",marketOpen?ProfitColor:LossColor);y+=36;
+      CreateValueLabel("LEFT_TRADE",leftX+15,y,"TRADING STATUS",tradeSafe?"ALLOWED":"BLOCKED",tradeSafe?ProfitColor:WarningColor);
+      CreateValueLabel("LEFT_SESSION",leftX+20+half,y,"SESSION",CurrentSessionText(),TextColor);y+=36;
+      CreateValueLabel("LEFT_SERVER",leftX+15,y,"SERVER TIME",TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),TextColor);
+      CreateValueLabel("LEFT_LOCAL",leftX+20+half,y,"LOCAL TIME",TimeToString(TimeLocal(),TIME_DATE|TIME_SECONDS),TextColor);y+=36;
+      CreateValueLabel("LEFT_PERMIT",leftX+15,y,"BUY / SELL",IsTradeAllowed()?"ENABLED":"DISABLED",IsTradeAllowed()?ProfitColor:WarningColor);
+      CreateValueLabel("LEFT_STATUS",leftX+20+half,y,"EA STATUS",tradeSafe?"ACTIVE":"WARNING",tradeSafe?AccentColor:WarningColor);
    }
-   DrawCell("PERF","POS",PerformancePanelPosition,qx,qy,qw,qh,6,92,189,28,"POSITION: "+position,ticket<0?C'255,214,64':C'0,255,170',ticket<0?C'72,58,18':C'0,72,58',fs);
-   DrawCell("PERF","ACT",PerformancePanelPosition,qx,qy,qw,qh,195,92,189,28,gLastAction,C'235,240,255',C'32,42,64',fs);
+   else ObjectsDeleteAll(0,PREFIX+"UI_LEFT");
+
+   int activeType=-1,activeTicket=ActiveTicket(activeType);double lot=FixedLots,sl=0,tp=0,entry=0,current=0,riskMoney=0,rr=0;
+   if(activeTicket>0&&OrderSelect(activeTicket,SELECT_BY_TICKET,MODE_TRADES))
+   {
+      lot=OrderLots();sl=OrderStopLoss();tp=OrderTakeProfit();entry=OrderOpenPrice();current=activeType==OP_BUY?Bid:Ask;
+      string riskKey="SFP.ISL."+IntegerToString(AccountNumber())+"."+IntegerToString(MagicNumber)+"."+IntegerToString(activeTicket);
+      double initialSL=GlobalVariableCheck(riskKey)?GlobalVariableGet(riskKey):sl;riskMoney=MoneyRiskAtStop(lot,entry,initialSL);
+      if(initialSL>0&&tp>0)rr=MathAbs(tp-entry)/MathAbs(entry-initialSL);
+   }
+   double riskPct=AccountBalance()>0&&riskMoney>0?riskMoney/AccountBalance()*100.0:0;
+   if(ShowRightPanel)
+   {
+      CreateRightPanel("RIGHT",RightMargin,rightX,rightY,rightW,rightH);CreateHeader("RIGHT",rightX,rightY,rightW,"ACCOUNT & RISK","LIVE TRADE PROTECTION");
+      CreateStatusIndicator("RIGHT_STATE",rightX+rightW-105,rightY+17,floating>0?"PROFIT":(floating<0?"LOSS":"SAFE"),floating>0?ProfitColor:(floating<0?LossColor:AccentColor));
+      int y=rightY+54,half=(rightW-32)/2;
+      CreateValueLabel("RIGHT_BAL",rightX+15,y,"BALANCE",DoubleToString(AccountBalance(),2),TextColor);CreateValueLabel("RIGHT_EQ",rightX+20+half,y,"EQUITY",DoubleToString(AccountEquity(),2),floating>=0?ProfitColor:LossColor);y+=36;
+      CreateValueLabel("RIGHT_FREE",rightX+15,y,"FREE MARGIN",DoubleToString(AccountFreeMargin(),2),TextColor);CreateValueLabel("RIGHT_MLVL",rightX+20+half,y,"MARGIN LEVEL",AccountMargin()>0?DoubleToString(marginLevel,1)+"%":"N/A",marginLevel>150||AccountMargin()==0?ProfitColor:WarningColor);y+=36;
+      CreateValueLabel("RIGHT_FLOAT",rightX+15,y,"FLOATING P/L",SignedValue(floating,2),floating>=0?ProfitColor:LossColor);CreateValueLabel("RIGHT_DAY",rightX+20+half,y,"TODAY'S P/L",SignedValue(today,2),today>=0?ProfitColor:LossColor);y+=36;
+      CreateValueLabel("RIGHT_OPEN",rightX+15,y,"OPEN TRADES",IntegerToString(openTrades),openTrades>0?AccentColor:NeutralColor);CreateValueLabel("RIGHT_LOT",rightX+20+half,y,"LOT SIZE",DoubleToString(lot,LotPrecision()),TextColor);y+=36;
+      CreateValueLabel("RIGHT_RISK",rightX+15,y,"RISK",DoubleToString(riskMoney,2)+" / "+DoubleToString(riskPct,2)+"%",riskMoney<=MaximumRiskPerTradeMoney?ProfitColor:WarningColor);CreateValueLabel("RIGHT_RR",rightX+20+half,y,"RISK / REWARD",rr>0?"1 : "+DoubleToString(rr,2):"N/A",TextColor);y+=36;
+      CreateValueLabel("RIGHT_SL",rightX+15,y,"CURRENT SL",sl>0?DoubleToString(sl,Digits):"-",LossColor);CreateValueLabel("RIGHT_TP",rightX+20+half,y,"CURRENT TP",tp>0?DoubleToString(tp,Digits):"-",ProfitColor);y+=36;
+      string dailyStatus=DailyLossReached()?"LIMIT REACHED":(today>=0?"SAFE / PROFIT":"CONTROLLED LOSS");
+      CreateValueLabel("RIGHT_MAX",rightX+15,y,"MAX LOSS",DoubleToString(MaximumRiskPerTradeMoney,2),WarningColor);CreateValueLabel("RIGHT_DSTAT",rightX+20+half,y,"DAILY STATUS",dailyStatus,DailyLossReached()?LossColor:(today>=0?ProfitColor:WarningColor));
+   }
+   else ObjectsDeleteAll(0,PREFIX+"UI_RIGHT");
+
+   if(ShowBottomPanel)
+   {
+      CreatePanel("BOTTOM",bottomX,bottomY,bottomW,bottomH);CreateHeader("BOTTOM",bottomX,bottomY,bottomW,"TRADE MANAGEMENT","SIGNAL / POSITION CONTROL");
+      string signal=gLongSignal?"BUY":(gShortSignal?"SELL":"WAIT");string position=activeTicket>0?(activeType==OP_BUY?"BUY ACTIVE":"SELL ACTIVE"):"FLAT";
+      string mainState=activeTicket>0?position:"WAITING FOR SIGNAL";color stateColor=activeTicket>0?(activeType==OP_BUY?ProfitColor:LossColor):NeutralColor;
+      UILabel("BOTTOM_MAIN",bottomX+15,bottomY+49,mainState,stateColor,ValueFontSize+5,"Segoe UI Semibold");
+      CreateStatusIndicator("BOTTOM_SIGNAL",bottomX+bottomW-122,bottomY+55,signal,signal=="BUY"?ProfitColor:(signal=="SELL"?LossColor:NeutralColor));
+      int col=(bottomW-30)/5,y=bottomY+82;
+      CreateValueLabel("BOTTOM_ENTRY",bottomX+15,y,"ENTRY",entry>0?DoubleToString(entry,Digits):"-",TextColor);
+      CreateValueLabel("BOTTOM_PRICE",bottomX+15+col,y,"CURRENT PRICE",DoubleToString(activeTicket>0?current:Bid,Digits),AccentColor);
+      CreateValueLabel("BOTTOM_SL",bottomX+15+col*2,y,"STOP LOSS",sl>0?DoubleToString(sl,Digits):"-",LossColor);
+      CreateValueLabel("BOTTOM_TP",bottomX+15+col*3,y,"TAKE PROFIT",tp>0?DoubleToString(tp,Digits):"-",ProfitColor);
+      CreateValueLabel("BOTTOM_PL",bottomX+15+col*4,y,"TRADE P/L",activeTicket>0?SignedValue(floating,2):"0.00",floating>=0?ProfitColor:LossColor);
+      y=bottomY+115;double slDistance=activeTicket>0&&sl>0?MathAbs(current-sl)/Point:0,tpDistance=activeTicket>0&&tp>0?MathAbs(tp-current)/Point:0;
+      UILabel("BOTTOM_META1",bottomX+15,y,"SL DIST  "+(slDistance>0?DoubleToString(slDistance,0)+" pts":"-"),SecondaryTextColor,PanelFontSize);
+      UILabel("BOTTOM_META2",bottomX+15+bottomW/5,y,"TP DIST  "+(tpDistance>0?DoubleToString(tpDistance,0)+" pts":"-"),SecondaryTextColor,PanelFontSize);
+      UILabel("BOTTOM_META3",bottomX+15+bottomW*2/5,y,"TRAIL  "+(EnableTrailingStop?"ARMED":"OFF"),EnableTrailingStop?AccentColor:NeutralColor,PanelFontSize);
+      UILabel("BOTTOM_META4",bottomX+15+bottomW*3/5,y,"B/E  "+(UseBreakEven?"ARMED":"OFF"),UseBreakEven?AccentColor:NeutralColor,PanelFontSize);
+      UILabel("BOTTOM_META5",bottomX+15+bottomW*4/5,y,"TP1 / TP2  N/A",SecondaryTextColor,PanelFontSize);
+   }
+   else ObjectsDeleteAll(0,PREFIX+"UI_BOTTOM");
    ChartRedraw(0);
 }
+
+void UpdatePanelPositions(){UpdateDashboard();}
 
 void FinalEquityPixel(string id,int x,int y,int width,int height,color c)
 {
@@ -1738,7 +1896,7 @@ int OnInit()
    gDrawFilter[6]=EnableEMA&&DrawEMAOnChart;gDrawFilter[7]=EnableAO&&DrawAOOnChart;gDrawFilter[8]=EnableSAR&&DrawSAROnChart;
    gDrawFilter[9]=EnableCCI&&DrawCCIOnChart;gDrawFilter[10]=EnableADX&&DrawADXOnChart;
    gShowEnabledOnly=(InitialFilterPanelMode==Show_Activated_Filters_Only);
-   if(!IsTesting() || IsVisualMode()) ApplyChartTheme();
+   if(!IsTesting() || IsVisualMode()){ApplyChartTheme();UpdateDashboard();}
    // Timer-driven graphics are disabled in Strategy Tester. Visual tests
    // update once per bar/trade instead, allowing the Skip button to work.
    if(!IsTesting()) EventSetTimer(1);
@@ -1751,12 +1909,12 @@ void OnDeinit(const int reason)
    EventKillTimer();
    if(IsTesting() && IsVisualMode() && KeepVisualsAfterBacktest)
    {
-      // Preserve regular chart objects and replace the dynamic Canvas (which
-      // MT4 destroys with the EA) with a static raised final-equity snapshot.
+      // Preserve the responsive dashboards and regular chart drawings at the
+      // end of a visual test.
       UpdateDashboard();
       UpdateFilterChartDrawings();
       gKnownResultHistory=-1;UpdateClosedTradeResults();
-      DrawPersistentFinalEquityCurve();
+      UpdatePanelPositions();
       DestroyEquityCurve();
       // Do not explicitly free signal bitmap resources in preserve mode.
       ChartRedraw(0);
@@ -1816,6 +1974,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
          gChartLayoutDirty=false;
       }
       else gChartLayoutDirty=true;
+      UpdatePanelPositions();
    }
 }
 
@@ -1853,7 +2012,11 @@ void OnTick()
          gLastChartResultRefresh=motionNow;
       }
    }
-   if(Time[0]==gLastBar) return;
+   if(Time[0]==gLastBar)
+   {
+      if(allowGraphics)UpdateDashboard();
+      return;
+   }
    gLastBar=Time[0];
    if(gChartLayoutDirty)
    {
