@@ -1678,6 +1678,7 @@ void CreatePanel(string id,int x,int y,int width,int height)
    UIRect(id+"_GLOW",x-2,y-2,width+4,height+4,C'5,14,30',C'0,92,190');
    UIRect(id+"_SHADOW",x+3,y+3,width,height,C'4,7,14',C'4,7,14');
    UIRect(id+"_PANEL",x,y,width,height,PanelBackground,PanelBorder);
+   ObjectSetInteger(0,PREFIX+"UI_"+id+"_PANEL",OBJPROP_BORDER_TYPE,BORDER_RAISED);
    UIRect(id+"_ACCENT",x,y,4,height,AccentColor,AccentColor);
 }
 
@@ -1693,7 +1694,7 @@ void CreateRightPanel(string id,int rightDistance,int absoluteX,int y,int width,
    if(UIEnsureObject(panel,OBJ_RECTANGLE_LABEL))
    {
       ObjectSetInteger(0,panel,OBJPROP_CORNER,CORNER_RIGHT_UPPER);ObjectSetInteger(0,panel,OBJPROP_XDISTANCE,rightDistance);ObjectSetInteger(0,panel,OBJPROP_YDISTANCE,y);
-      ObjectSetInteger(0,panel,OBJPROP_XSIZE,width);ObjectSetInteger(0,panel,OBJPROP_YSIZE,height);ObjectSetInteger(0,panel,OBJPROP_BGCOLOR,PanelBackground);ObjectSetInteger(0,panel,OBJPROP_COLOR,PanelBorder);ObjectSetInteger(0,panel,OBJPROP_BORDER_TYPE,BORDER_FLAT);
+      ObjectSetInteger(0,panel,OBJPROP_XSIZE,width);ObjectSetInteger(0,panel,OBJPROP_YSIZE,height);ObjectSetInteger(0,panel,OBJPROP_BGCOLOR,PanelBackground);ObjectSetInteger(0,panel,OBJPROP_COLOR,PanelBorder);ObjectSetInteger(0,panel,OBJPROP_BORDER_TYPE,BORDER_RAISED);
    }
    UIRect(id+"_ACCENT",absoluteX,y,4,height,AccentColor,AccentColor);
 }
@@ -1710,6 +1711,7 @@ void UILabel(string id,int x,int y,string text,color clr,int size,string font="S
 void CreateHeader(string panelId,int x,int y,int width,string title,string subtitle)
 {
    UIRect(panelId+"_HEADER",x+5,y+5,width-10,38,HeaderColor,HeaderColor);
+   ObjectSetInteger(0,PREFIX+"UI_"+panelId+"_HEADER",OBJPROP_BORDER_TYPE,BORDER_RAISED);
    UILabel(panelId+"_TITLE",x+15,y+10,title,TextColor,PanelFontSize+2,"Segoe UI Semibold");
    UILabel(panelId+"_SUB",x+15,y+26,subtitle,SecondaryTextColor,PanelFontSize-1);
 }
@@ -1752,6 +1754,8 @@ void DeletePanelObjects()
 void UICard(string id,int x,int y,int width,int height)
 {
    UIRect(id,x,y,width,height,C'10,25,49',C'21,82,145');
+   // Solid native MT4 raised cards provide an opaque, tactile terminal look.
+   ObjectSetInteger(0,PREFIX+"UI_"+id,OBJPROP_BORDER_TYPE,BORDER_RAISED);
 }
 
 void UIProgressBar(string id,int x,int y,int width,double value,double maximum,color fill)
