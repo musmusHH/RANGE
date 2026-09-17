@@ -442,7 +442,10 @@ void UpdateFilterChartDrawings()
    {
       ObjectsDeleteAll(0,PREFIX+"FILTER_PLOT_"+IntegerToString(filter)+"_");
       ObjectDelete(0,PREFIX+"FILTER_CHART_"+IntegerToString(filter)); // old text-only drawing
-      if(!IsTradingFilterEnabled(filter) || !gDrawFilter[filter])continue;
+      // The Pro chart is intentionally Supertrend-only. Enforce this here,
+      // independent of any old MT4 input preset retained by the terminal.
+      if(filter!=3)continue;
+      if(!EnableSupertrend || !gDrawFilter[3])continue;
       if(filter==0 || filter==6)
       {
          int method=(filter==0)?MODE_SMA:MODE_EMA;
@@ -1761,8 +1764,12 @@ void UICard(string id,int x,int y,int width,int height)
 void UIProgressBar(string id,int x,int y,int width,double value,double maximum,color fill)
 {
    double ratio=maximum>0?MathMax(0,MathMin(1,value/maximum)):0;
-   UIRect(id+"_TRACK",x,y,width,10,C'18,48,91',C'23,62,112');
-   UIRect(id+"_FILL",x,y,(int)MathMax(2,width*ratio),10,fill,fill);
+   string track=PREFIX+"UI_"+id+"_TRACK",filled=PREFIX+"UI_"+id+"_FILL";
+   // Both components are fully opaque native raised objects—not flat paint.
+   UIRect(id+"_TRACK",x,y,width,12,C'18,48,91',C'64,94,140');
+   ObjectSetInteger(0,track,OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   UIRect(id+"_FILL",x+1,y+1,(int)MathMax(2,(width-2)*ratio),10,fill,fill);
+   ObjectSetInteger(0,filled,OBJPROP_BORDER_TYPE,BORDER_RAISED);
 }
 
 double EnabledWeightTotal()
@@ -1839,9 +1846,14 @@ void UpdateDashboard()
       int ix=leftX+36+scoreW+marketW,iy=cardY+14;UILabel("LEFT_IHEAD",ix,iy,"INDICATORS",TextColor,PanelFontSize,"Segoe UI Semibold");iy+=23;
       string indicatorNames[11]={"SMA","RSI","MACD","Supertrend","Stochastic","Bollinger","EMA","AO","SAR","CCI","ADX"};
       for(int q=0;q<11;q++){string state=gBull[q]?"UP":(gBear[q]?"DOWN":"-");color stateColor=gBull[q]?ProfitColor:(gBear[q]?LossColor:NeutralColor);UILabel("LEFT_IN"+IntegerToString(q),ix,iy,indicatorNames[q],SecondaryTextColor,PanelFontSize-1);UILabel("LEFT_IS"+IntegerToString(q),ix+indicatorW-46,iy,state,stateColor,PanelFontSize-1,"Segoe UI Semibold");iy+=17;}
-      int stateY=leftY+leftH-66;UICard("LEFT_STATECARD",leftX+12,stateY,leftW-24,52);
-      string signal=gLongSignal?"BUY SIGNAL":(gShortSignal?"SELL SIGNAL":"NO SIGNAL");color signalColor=gLongSignal?ProfitColor:(gShortSignal?LossColor:AccentColor);
-      UILabel("LEFT_SIGNAL",leftX+34,stateY+13,signal,signalColor,ValueFontSize+5,"Segoe UI Semibold");UILabel("LEFT_WAIT",leftX+220,stateY+18,gLongSignal||gShortSignal?"Valid closed-candle setup":"Waiting for a valid setup...",SecondaryTextColor,PanelFontSize);
+      int stateY=leftY+leftH-66;string signalCard=PREFIX+"UI_LEFT_STATECARD";
+      color signalBg=gLongSignal?C'0,112,72':(gShortSignal?C'156,28,45':C'10,25,49');
+      color signalBorder=gLongSignal?ProfitColor:(gShortSignal?LossColor:C'21,82,145');
+      UIRect("LEFT_STATECARD",leftX+12,stateY,leftW-24,52,signalBg,signalBorder);
+      ObjectSetInteger(0,signalCard,OBJPROP_BORDER_TYPE,BORDER_RAISED);
+      string signal=gLongSignal?"▲  BUY SIGNAL":(gShortSignal?"▼  SELL SIGNAL":"◆  NO SIGNAL");
+      UILabel("LEFT_SIGNAL",leftX+34,stateY+12,signal,TextColor,ValueFontSize+5,"Segoe UI Semibold");
+      UILabel("LEFT_WAIT",leftX+245,stateY+18,gLongSignal||gShortSignal?"Valid closed-candle setup":"Waiting for a valid setup...",gLongSignal||gShortSignal?TextColor:SecondaryTextColor,PanelFontSize);
    }
    else ObjectsDeleteAll(0,PREFIX+"UI_LEFT");
 
@@ -1875,9 +1887,13 @@ void UpdateDashboard()
       CreatePanel("BOTTOM",bottomX,bottomY,bottomW,bottomH);CreateHeader("BOTTOM",bottomX,bottomY,bottomW,"ACTIVE POSITION","TRADE MANAGEMENT");
       CreateStatusIndicator("BOTTOM_MANAGED",bottomX+bottomW-100,bottomY+18,activeTicket>0?"MANAGED":"WAITING",activeTicket>0?ProfitColor:NeutralColor);
       int contentY=bottomY+48,leftCardW=(int)(bottomW*0.55),rightCardW=bottomW-leftCardW-32,cardH=(int)MathMax(54,MathMin(76,bottomH-113));
-      UICard("BOTTOM_POSITION",bottomX+12,contentY,leftCardW,cardH);UICard("BOTTOM_PROFIT",bottomX+20+leftCardW,contentY,rightCardW,cardH);
-      string side=activeTicket>0?(activeType==OP_BUY?"BUY":"SELL"):"WAITING FOR SIGNAL";color sideColor=activeTicket>0?(activeType==OP_BUY?ProfitColor:LossColor):AccentColor;
-      UILabel("BOTTOM_SIDE",bottomX+24,contentY+9,side,sideColor,ValueFontSize+3,"Segoe UI Semibold");
+      color positionBg=activeTicket>0?(activeType==OP_BUY?C'0,88,61':C'125,24,40'):C'10,25,49';
+      color positionBorder=activeTicket>0?(activeType==OP_BUY?ProfitColor:LossColor):C'21,82,145';
+      UIRect("BOTTOM_POSITION",bottomX+12,contentY,leftCardW,cardH,positionBg,positionBorder);
+      ObjectSetInteger(0,PREFIX+"UI_BOTTOM_POSITION",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+      UICard("BOTTOM_PROFIT",bottomX+20+leftCardW,contentY,rightCardW,cardH);
+      string side=activeTicket>0?(activeType==OP_BUY?"▲  BUY":"▼  SELL"):"◆  WAITING FOR SIGNAL";
+      UILabel("BOTTOM_SIDE",bottomX+24,contentY+9,side,TextColor,ValueFontSize+3,"Segoe UI Semibold");
       int levelY=contentY+36,levelCol=(leftCardW-24)/3;string pl[3]={"ENTRY","SL","TP"};string pv[3];pv[0]=entry>0?DoubleToString(entry,Digits):"-";pv[1]=sl>0?DoubleToString(sl,Digits):"-";pv[2]=tp>0?DoubleToString(tp,Digits):"-";
       for(int p=0;p<3;p++){int lx=bottomX+24+p*levelCol;UILabel("BOTTOM_PL"+IntegerToString(p),lx,levelY,pl[p],SecondaryTextColor,PanelFontSize-1);UILabel("BOTTOM_PV"+IntegerToString(p),lx,levelY+13,pv[p],p==1?LossColor:(p==2?ProfitColor:TextColor),PanelFontSize);}
       int px=bottomX+32+leftCardW;UILabel("BOTTOM_CURPL",px,contentY+9,"CURRENT P/L",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_CURPV",px+rightCardW-95,contentY+7,activeTicket>0?SignedValue(tradePL,2):"0.00",tradePL>=0?ProfitColor:LossColor,ValueFontSize+3,"Segoe UI Semibold");
@@ -1965,10 +1981,10 @@ int OnInit()
    gSellOrbResource="::SF_SELL_ORB_"+IntegerToString((int)ChartID());
    CreateSignalOrbResource(true);CreateSignalOrbResource(false);
    ArrayInitialize(gBull,false);ArrayInitialize(gBear,false);ArrayInitialize(gDrawFilter,false);
-   gDrawFilter[0]=EnableSMA&&DrawSMAOnChart;gDrawFilter[1]=EnableRSI&&DrawRSIOnChart;gDrawFilter[2]=EnableMACD&&DrawMACDOnChart;
-   gDrawFilter[3]=EnableSupertrend&&DrawSupertrendOnChart;gDrawFilter[4]=EnableStochastic&&DrawStochasticOnChart;gDrawFilter[5]=EnableBollinger&&DrawBollingerOnChart;
-   gDrawFilter[6]=EnableEMA&&DrawEMAOnChart;gDrawFilter[7]=EnableAO&&DrawAOOnChart;gDrawFilter[8]=EnableSAR&&DrawSAROnChart;
-   gDrawFilter[9]=EnableCCI&&DrawCCIOnChart;gDrawFilter[10]=EnableADX&&DrawADXOnChart;
+   // Drawing policy is fixed to Supertrend only; trading-filter enables and
+   // weighted signal calculations remain completely independent.
+   for(int drawIndex=0;drawIndex<11;drawIndex++)gDrawFilter[drawIndex]=false;
+   gDrawFilter[3]=EnableSupertrend&&DrawSupertrendOnChart;
    gShowEnabledOnly=(InitialFilterPanelMode==Show_Activated_Filters_Only);
    if(!IsTesting() || IsVisualMode()){ApplyChartTheme();UpdateFilterChartDrawings();UpdateDashboard();}
    // Timer-driven graphics are disabled in Strategy Tester. Visual tests
