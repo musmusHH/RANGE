@@ -164,17 +164,17 @@ input EA_CORNER PerformancePanelPosition = EA_Bottom_Right;
 input FILTER_PANEL_MODE InitialFilterPanelMode = Show_Activated_Filters_Only;
 // Independent chart-drawing defaults. These affect visuals only and do not
 // enable or disable an indicator in the trading signal calculation.
-input bool DrawSMAOnChart         = true;
-input bool DrawRSIOnChart         = true;
-input bool DrawMACDOnChart        = true;
+input bool DrawSMAOnChart         = false;
+input bool DrawRSIOnChart         = false;
+input bool DrawMACDOnChart        = false;
 input bool DrawSupertrendOnChart  = true;
-input bool DrawStochasticOnChart  = true;
-input bool DrawBollingerOnChart   = true;
-input bool DrawEMAOnChart         = true;
-input bool DrawAOOnChart          = true;
-input bool DrawSAROnChart         = true;
-input bool DrawCCIOnChart         = true;
-input bool DrawADXOnChart         = true;
+input bool DrawStochasticOnChart  = false;
+input bool DrawBollingerOnChart   = false;
+input bool DrawEMAOnChart         = false;
+input bool DrawAOOnChart          = false;
+input bool DrawSAROnChart         = false;
+input bool DrawCCIOnChart         = false;
+input bool DrawADXOnChart         = false;
 input int  FilterDrawingBars = 150;
 input bool DrawBuySellSignalOrbs = true;
 input int  SignalHistoryBars = 300;
@@ -1960,6 +1960,7 @@ int OnInit()
    // the current layout once with the latest responsive geometry.
    DeletePanelObjects();
    ObjectsDeleteAll(0,PREFIX+"FINAL_EQ_");
+   ObjectsDeleteAll(0,PREFIX+"FILTER_PLOT_");
    gBuyOrbResource="::SF_BUY_ORB_"+IntegerToString((int)ChartID());
    gSellOrbResource="::SF_SELL_ORB_"+IntegerToString((int)ChartID());
    CreateSignalOrbResource(true);CreateSignalOrbResource(false);
@@ -1969,7 +1970,7 @@ int OnInit()
    gDrawFilter[6]=EnableEMA&&DrawEMAOnChart;gDrawFilter[7]=EnableAO&&DrawAOOnChart;gDrawFilter[8]=EnableSAR&&DrawSAROnChart;
    gDrawFilter[9]=EnableCCI&&DrawCCIOnChart;gDrawFilter[10]=EnableADX&&DrawADXOnChart;
    gShowEnabledOnly=(InitialFilterPanelMode==Show_Activated_Filters_Only);
-   if(!IsTesting() || IsVisualMode()){ApplyChartTheme();UpdateDashboard();}
+   if(!IsTesting() || IsVisualMode()){ApplyChartTheme();UpdateFilterChartDrawings();UpdateDashboard();}
    // Timer-driven graphics are disabled in Strategy Tester. Visual tests
    // update once per bar/trade instead, allowing the Skip button to work.
    if(!IsTesting()) EventSetTimer(1);
