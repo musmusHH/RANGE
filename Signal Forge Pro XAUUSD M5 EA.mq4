@@ -127,11 +127,11 @@ input int  EMASlowLength = 21;
 input bool EnableEMA200TrendFilter = true;
 input int  EMA200Period = 200;
 input bool DrawEMA200OnChart = true;
-input int  EMA200LineWidth = 2;
-input color EMA200LineColor = C'0,229,255';
-input color EMA200CardBackground = C'11,26,48';
-input color EMA200CardBorder = C'0,229,255';
-input color EMA200CardText = C'245,247,250';
+input int  EMA200LineWidth = 3;
+input color EMA200LineColor = C'0,255,255';
+input color EMA200CardBackground = C'0,229,255';
+input color EMA200CardBorder = C'255,255,255';
+input color EMA200CardText = C'3,14,25';
 input bool EnableAO = true;
 input bool EnableSAR = true;
 input double SARStep = 0.02;
@@ -477,7 +477,7 @@ void UpdateEMA200Endpoint()
    double ema200=iMA(NULL,0,period,0,MODE_EMA,PRICE_CLOSE,0);int endpointX=0,endpointY=0;
    if(!ChartTimePriceToXY(0,0,Time[0],ema200,endpointX,endpointY)){ObjectDelete(0,card);ObjectDelete(0,text);return;}
    long chartWidth=0;ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartWidth);
-   int cardWidth=68,cardHeight=22,cardX=endpointX+8,cardY=endpointY-cardHeight/2;
+   int cardWidth=82,cardHeight=28,cardX=endpointX+9,cardY=endpointY-cardHeight/2;
    if(cardX+cardWidth>(int)chartWidth-4)cardX=endpointX-cardWidth-8;
    cardX=(int)MathMax(2,cardX);cardY=(int)MathMax(2,cardY);
    if(ObjectFind(0,card)<0)ObjectCreate(0,card,OBJ_RECTANGLE_LABEL,0,0,0);
@@ -486,8 +486,8 @@ void UpdateEMA200Endpoint()
    ObjectSetInteger(0,card,OBJPROP_COLOR,EMA200CardBorder);ObjectSetInteger(0,card,OBJPROP_BORDER_TYPE,BORDER_RAISED);ObjectSetInteger(0,card,OBJPROP_BACK,false);
    ObjectSetInteger(0,card,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,card,OBJPROP_HIDDEN,true);ObjectSetInteger(0,card,OBJPROP_ZORDER,4);
    if(ObjectFind(0,text)<0)ObjectCreate(0,text,OBJ_LABEL,0,0,0);
-   ObjectSetInteger(0,text,OBJPROP_CORNER,CORNER_LEFT_UPPER);ObjectSetInteger(0,text,OBJPROP_XDISTANCE,cardX+9);ObjectSetInteger(0,text,OBJPROP_YDISTANCE,cardY+4);
-   ObjectSetString(0,text,OBJPROP_TEXT,"EMA200");ObjectSetString(0,text,OBJPROP_FONT,"Segoe UI Semibold");ObjectSetInteger(0,text,OBJPROP_FONTSIZE,8);
+   ObjectSetInteger(0,text,OBJPROP_CORNER,CORNER_LEFT_UPPER);ObjectSetInteger(0,text,OBJPROP_XDISTANCE,cardX+10);ObjectSetInteger(0,text,OBJPROP_YDISTANCE,cardY+5);
+   ObjectSetString(0,text,OBJPROP_TEXT,"EMA200");ObjectSetString(0,text,OBJPROP_FONT,"Arial Black");ObjectSetInteger(0,text,OBJPROP_FONTSIZE,10);
    ObjectSetInteger(0,text,OBJPROP_COLOR,EMA200CardText);ObjectSetInteger(0,text,OBJPROP_BACK,false);ObjectSetInteger(0,text,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,text,OBJPROP_HIDDEN,true);ObjectSetInteger(0,text,OBJPROP_ZORDER,5);
 }
 
