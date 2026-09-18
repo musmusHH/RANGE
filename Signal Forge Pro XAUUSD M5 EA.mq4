@@ -42,8 +42,8 @@ input double RiskReferenceBalance = 0.0; // 0 = current account balance
 //--- Point trailing stop (requested defaults)
 input bool   EnableTrailingStop = true;
 input double TrailingStartPoints = 700.0;
-input double TrailingDistancePoints = 700.0;
-input double TrailingStepPoints = 100.0;
+input double TrailingDistancePoints = 50.0;
+input double TrailingStepPoints = 50.0;
 
 //--- Enhanced weighted score aggregation (closed candles only)
 input bool   UseSignalScore = true;
@@ -81,7 +81,7 @@ input double MaximumLotLimit = 1.00;
 input double MinimumMarginLevelPercent = 150.0;
 input bool   UseMinimumRiskRewardFilter = false;
 input double MinimumRiskReward = 1.00;
-input bool   UseBreakEven = true;
+input bool   UseBreakEven = false;
 input double BreakEvenStartPoints = 400.0;
 input double BreakEvenOffsetPoints = 50.0;
 input bool   UseTradingSession = false;
@@ -209,7 +209,7 @@ input bool   DetailedResultCards = true;
 input int  MaximumResultBoxes = 50;
 input int  ResultBoxPaddingPixels = 8;
 input int  ResultCardCandleGapPixels = 20;
-input bool MoveResultCardsEveryTick = true;
+input bool MoveResultCardsEveryTick = false;
 input int  ResultMovementRefreshMs = 100; // fallback when every-tick mode is off
 
 string PREFIX="SF_EA_";
