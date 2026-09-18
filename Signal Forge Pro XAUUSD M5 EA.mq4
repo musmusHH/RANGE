@@ -1987,20 +1987,23 @@ void UpdateOption13Dashboard()
       int tickY=meterY+meterH-6-(int)MathRound((meterH-12)*tick/10.0);
       UILabel("O13_SCORE_T"+IntegerToString(tick),leftX+296,tickY,IntegerToString(tick*10),SecondaryTextColor,PanelFontSize-2);
    }
-   UIRect("O13_SCORE_BADGE",leftX+262,topY+283,39,25,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_SCORE_BADGE",OBJPROP_BORDER_TYPE,BORDER_RAISED);
-   UILabel("O13_SCORE_NUMBER",leftX+269,topY+288,DoubleToString(scorePercent,0),TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UIRect("O13_SCORE_BADGE",leftX+260,topY+283,30,25,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_SCORE_BADGE",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   UILabel("O13_SCORE_NUMBER",leftX+265,topY+288,DoubleToString(scorePercent,0),TextColor,ValueFontSize+1,"Segoe UI Semibold");
 
    // All technical indicators receive live closed-bar values normalized to
    // 0..100. The three principal gauges use those same values.
    double indicatorPercent[];GetIndicatorPercentages(1,indicatorPercent);
    double rsi=indicatorPercent[1],macdPercent=indicatorPercent[2];
    double qualityPercent=Percent0To100(gCandleScore/5.0*100.0);
-   UpdateOption13NeonGauge("RSI",leftX+331,topY+61,rsi);
-   UpdateOption13NeonGauge("MACD",leftX+331,topY+146,macdPercent);
-   UpdateOption13NeonGauge("QUALITY",leftX+331,topY+231,qualityPercent);
-   UILabel("O13_RSI_L",leftX+350,topY+55,"RSI",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("O13_RSI_V",leftX+350,topY+87,DoubleToString(rsi,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
-   UILabel("O13_MACD_L",leftX+343,topY+140,"MACD",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("O13_MACD_V",leftX+346,topY+172,DoubleToString(macdPercent,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
-   UILabel("O13_QUALITY_L",leftX+326,topY+225,"SIGNAL QUALITY",TextColor,PanelFontSize-1,"Segoe UI Semibold");UILabel("O13_QUALITY_V",leftX+348,topY+257,DoubleToString(qualityPercent,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UpdateOption13NeonGauge("RSI",leftX+340,topY+65,rsi);
+   UpdateOption13NeonGauge("MACD",leftX+340,topY+150,macdPercent);
+   UpdateOption13NeonGauge("QUALITY",leftX+340,topY+235,qualityPercent);
+   UIRect("O13_RSI_HEAD",leftX+346,topY+55,56,14,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_RSI_HEAD",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   UIRect("O13_MACD_HEAD",leftX+346,topY+140,56,14,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_MACD_HEAD",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   UIRect("O13_QUALITY_HEAD",leftX+337,topY+225,74,14,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_QUALITY_HEAD",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   UILabel("O13_RSI_L",leftX+365,topY+56,"RSI",TextColor,PanelFontSize-1,"Segoe UI Semibold");UILabel("O13_RSI_V",leftX+359,topY+91,DoubleToString(rsi,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UILabel("O13_MACD_L",leftX+357,topY+141,"MACD",TextColor,PanelFontSize-1,"Segoe UI Semibold");UILabel("O13_MACD_V",leftX+355,topY+176,DoubleToString(macdPercent,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UILabel("O13_QUALITY_L",leftX+341,topY+226,"SIGNAL QUALITY",TextColor,PanelFontSize-2,"Segoe UI Semibold");UILabel("O13_QUALITY_V",leftX+357,topY+261,DoubleToString(qualityPercent,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
 
    int type=-1,ticket=ActiveTicket(type);double entry=0,sl=0,tp=0,lots=0,profit=0;
    if(ticket>0&&OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES)){entry=OrderOpenPrice();sl=OrderStopLoss();tp=OrderTakeProfit();lots=OrderLots();profit=OrderProfit()+OrderSwap()+OrderCommission();}
@@ -2018,6 +2021,13 @@ void UpdateOption13Dashboard()
    if(ShowProtectionResetButton)UIButton(RESET_BUTTON_NAME,rightX+220,topY+207,102,22,paused?"RESET PAUSE":"RISK READY",paused?C'135,25,43':C'15,70,85',paused?LossColor:AccentColor);
 
    UILabel("O13_ACTIVE_TITLE",rightX+102,activeY+20,"ACTIVE POSITION",TextColor,PanelFontSize+2,"Segoe UI Semibold");
+   // Solid raised runtime cards replace the painted grid. Native rectangle
+   // separators remain sharp at every MT4 display scale.
+   UIRect("O13_POSITION_CARD",rightX+18,activeY+67,309,94,C'3,14,25',C'45,102,133');ObjectSetInteger(0,PREFIX+"UI_O13_POSITION_CARD",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   UIRect("O13_POSITION_HEAD",rightX+22,activeY+72,301,29,C'12,39,62',C'64,137,172');ObjectSetInteger(0,PREFIX+"UI_O13_POSITION_HEAD",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   UIRect("O13_INDICATOR_CARD",rightX+18,activeY+169,309,137,C'3,14,25',C'45,102,133');ObjectSetInteger(0,PREFIX+"UI_O13_INDICATOR_CARD",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   int columnSeparators[5]={64,130,170,225,273};
+   for(int separator=0;separator<5;separator++){UIRect("O13_POS_SEP"+IntegerToString(separator),rightX+columnSeparators[separator],activeY+75,1,23,C'39,91,119',C'39,91,119');ObjectSetInteger(0,PREFIX+"UI_O13_POS_SEP"+IntegerToString(separator),OBJPROP_BORDER_TYPE,BORDER_RAISED);}
    string headers[6]={"TYPE","SYMBOL","LOTS","PRICE","S/L","T/P"};int hx[6]={25,70,137,177,231,280};
    for(int h=0;h<6;h++)UILabel("O13_AH"+IntegerToString(h),rightX+hx[h],activeY+82,headers[h],SecondaryTextColor,PanelFontSize-1);
    if(ticket>0)
@@ -2037,6 +2047,7 @@ void UpdateOption13Dashboard()
    // Compact all-indicator monitor. Every displayed reading is a real closed-
    // bar calculation normalized to the common 0..100 HUD scale.
    string indicatorNames[11]={"SMA","RSI","MACD","SUPERTREND","STOCH","BOLLINGER","EMA","AO","SAR","CCI","ADX"};
+   UIRect("O13_IND_DIVIDER",rightX+180,activeY+197,2,100,C'25,70,96',C'49,112,143');ObjectSetInteger(0,PREFIX+"UI_O13_IND_DIVIDER",OBJPROP_BORDER_TYPE,BORDER_RAISED);
    UILabel("O13_IND_HEAD",rightX+24,activeY+180,"INDICATORS  0-100",AccentColor,PanelFontSize,"Segoe UI Semibold");
    for(int indicator=0;indicator<11;indicator++)
    {
@@ -2044,8 +2055,8 @@ void UpdateOption13Dashboard()
       int indicatorX=rightX+24+column*164,indicatorY=activeY+201+rowIndex*17;
       color indicatorColor=indicatorPercent[indicator]>=55?ProfitColor:(indicatorPercent[indicator]<=45?LossColor:AccentColor);
       UILabel("O13_IND_L"+IntegerToString(indicator),indicatorX,indicatorY,indicatorNames[indicator],SecondaryTextColor,PanelFontSize-2);
-      UIRect("O13_IND_T"+IntegerToString(indicator),indicatorX+67,indicatorY+4,34,6,C'5,20,34',C'30,69,91');
-      UIRect("O13_IND_F"+IntegerToString(indicator),indicatorX+68,indicatorY+5,(int)MathMax(1,32.0*indicatorPercent[indicator]/100.0),4,indicatorColor,indicatorColor);
+      UIRect("O13_IND_T"+IntegerToString(indicator),indicatorX+67,indicatorY+4,34,6,C'5,20,34',C'30,69,91');ObjectSetInteger(0,PREFIX+"UI_O13_IND_T"+IntegerToString(indicator),OBJPROP_BORDER_TYPE,BORDER_RAISED);
+      UIRect("O13_IND_F"+IntegerToString(indicator),indicatorX+68,indicatorY+5,(int)MathMax(1,32.0*indicatorPercent[indicator]/100.0),4,indicatorColor,indicatorColor);ObjectSetInteger(0,PREFIX+"UI_O13_IND_F"+IntegerToString(indicator),OBJPROP_BORDER_TYPE,BORDER_RAISED);
       UILabel("O13_IND_V"+IntegerToString(indicator),indicatorX+105,indicatorY,DoubleToString(indicatorPercent[indicator],0),indicatorColor,PanelFontSize-1,"Segoe UI Semibold");
    }
    ChartRedraw(0);
