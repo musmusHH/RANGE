@@ -205,6 +205,7 @@ input int  ResultMovementRefreshMs = 100; // fallback when every-tick mode is of
 
 string PREFIX="SF_EA_";
 datetime gLastBar=0;
+datetime gLastProcessedSignalCandle=0;
 bool gBull[11],gBear[11];
 bool gLongSignal=false,gShortSignal=false;
 double gBuyScore=0,gSellScore=0;
@@ -916,6 +917,11 @@ datetime ProtectionPeriodStart()
 string ProtectionResetKey()
 {
    return "SFP.RESET."+IntegerToString(AccountNumber())+"."+IntegerToString(MagicNumber)+"."+Symbol();
+}
+
+string ProcessedSignalKey()
+{
+   return "SFP.SIGNAL."+IntegerToString(AccountNumber())+"."+IntegerToString(MagicNumber)+"."+Symbol()+"."+IntegerToString(Period());
 }
 
 double ClosedPLFrom(datetime start)
@@ -2102,7 +2108,12 @@ int OnInit()
    // Timer-driven graphics are disabled in Strategy Tester. Visual tests
    // update once per bar/trade instead, allowing the Skip button to work.
    if(!IsTesting()) EventSetTimer(1);
-   gLastBar=0;
+   // Attach/recompile/input changes must never replay the already-closed
+   // candle as a fresh entry signal. Seed both guards to the current chart.
+   gLastBar=iTime(NULL,0,0);
+   int initialShift=(int)MathMax(1,SignalShift);
+   gLastProcessedSignalCandle=iTime(NULL,0,initialShift);
+   if(gLastProcessedSignalCandle>0)GlobalVariableSet(ProcessedSignalKey(),(double)gLastProcessedSignalCandle);
    return INIT_SUCCEEDED;
 }
 
@@ -2237,6 +2248,18 @@ void OnTick()
    }
 
    int shift=(int)MathMax(1,SignalShift); // closed candle only; never repaint with shift 0
+   datetime signalCandleTime=iTime(NULL,0,shift);
+   datetime sharedProcessed=GlobalVariableCheck(ProcessedSignalKey())?(datetime)GlobalVariableGet(ProcessedSignalKey()):0;
+   if(sharedProcessed>gLastProcessedSignalCandle)gLastProcessedSignalCandle=sharedProcessed;
+   if(signalCandleTime<=0||signalCandleTime<=gLastProcessedSignalCandle)
+   {
+      if(allowGraphics)UpdateDashboard();
+      return;
+   }
+   // Claim this closed candle before evaluating or sending. Reinitialization,
+   // duplicate charts and failed entry attempts cannot replay it later.
+   gLastProcessedSignalCandle=signalCandleTime;
+   GlobalVariableSet(ProcessedSignalKey(),(double)signalCandleTime);
    GetConditions(shift,gBull,gBear);
    CombinedSignal(gBull,gBear,gLongSignal,gShortSignal);
    int direction=gLongSignal?1:(gShortSignal?-1:0);
