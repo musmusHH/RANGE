@@ -590,8 +590,11 @@ void UpdateOption13NeonGauge(string id,int x,int y,double percent)
    for(int py=0;py<side;py++)for(int px=0;px<side;px++)
    {
       double dx=px-center+0.5,dy=py-center+0.5,d=MathSqrt(dx*dx+dy*dy);
-      double angle=MathArctan2(dy,dx)*180.0/3.141592653589793;
-      if(angle<0)angle+=360.0;double relative=angle-135.0;if(relative<0)relative+=360.0;
+      // Use the MQL4 single-argument arctangent. Pixel-center offsets keep
+      // dx non-zero, so restore the correct quadrant explicitly.
+      double angle=MathArctan(dy/dx)*180.0/3.141592653589793;
+      if(dx<0)angle+=180.0;else if(angle<0)angle+=360.0;
+      double relative=angle-135.0;if(relative<0)relative+=360.0;
       bool inTrack=(relative<=270.0),active=(inTrack&&relative<=sweep);
       uint value=0;
       if(inTrack&&d>=27&&d<=32)value=active?neon:base;
