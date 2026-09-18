@@ -14,6 +14,9 @@
 #resource "\\Images\\SignalForgePro13\\orb_buy.bmp"
 #resource "\\Images\\SignalForgePro13\\orb_sell.bmp"
 #resource "\\Images\\SignalForgePro13\\orb_neutral.bmp"
+#resource "\\Images\\SignalForgePro13\\panel_signal.bmp"
+#resource "\\Images\\SignalForgePro13\\panel_account.bmp"
+#resource "\\Images\\SignalForgePro13\\panel_active.bmp"
 
 //--- Trading
 input int    MagicNumber       = 26051601;
@@ -1436,12 +1439,10 @@ void UpdateEquityCurve()
    ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,chartH);
    // Match the Performance panel width to the 390 px Signal panel.
    int gap=(int)MathMax(1,EquityPositionGap);
-   // End the equity canvas before the right-side position stack. This keeps
-   // an exact horizontal gap and prevents either panel from covering it.
-   int width=ResponsiveRightPanelLeft((int)chartW)-gap-MathMax(0,EquityCurveX);
-   int height=MathMax(90,EquityCurveHeight);
-   int x=MathMax(0,EquityCurveX);
-   int y=(int)chartH-MathMax(0,EquityCurveY)-height;
+   int width=UseOption13SapphireBitmapSkin?440:ResponsiveRightPanelLeft((int)chartW)-gap-MathMax(0,EquityCurveX);
+   int height=UseOption13SapphireBitmapSkin?(int)MathMax(70,MathMin(228,(int)chartH-430)):MathMax(90,EquityCurveHeight);
+   int x=UseOption13SapphireBitmapSkin?15:MathMax(0,EquityCurveX);
+   int y=(int)chartH-(UseOption13SapphireBitmapSkin?15:MathMax(0,EquityCurveY))-height;
    if(width<220 || y<0) { DestroyEquityCurve(); return; }
    int historyTotal=OrdersHistoryTotal();
    if(gEquityCanvasReady && width==gEquityCanvasWidth && height==gEquityCanvasHeight &&
@@ -1460,9 +1461,9 @@ void UpdateEquityCurve()
    ObjectSetInteger(0,canvasName,OBJPROP_ZORDER,100);
 
    // Fully opaque equity card: no alpha transparency.
-   uint bg=ColorToARGB(C'8,14,26',255);
-   uint grid=ColorToARGB(C'42,56,82',210);
-   uint bright=ColorToARGB(C'110,150,255',255);
+   uint bg=ColorToARGB(UseOption13SapphireBitmapSkin?C'6,20,40':C'8,14,26',255);
+   uint grid=ColorToARGB(UseOption13SapphireBitmapSkin?C'28,68,105':C'42,56,82',210);
+   uint bright=ColorToARGB(UseOption13SapphireBitmapSkin?C'0,229,255':C'110,150,255',255);
    uint text=ColorToARGB(C'220,232,255',255);
    gEquityCanvas.Erase(bg);
    // Solid raised card border.
@@ -1507,7 +1508,7 @@ void UpdateEquityCurve()
       int plotWidth=MathMax(1,plotR-plotL);
       int prevX=plotL;
       int prevY=plotB-(int)MathRound((curve[0]-minV)/(maxV-minV)*(plotB-plotT));
-      uint curveColor=ColorToARGB(C'45,105,255',255);
+      uint curveColor=ColorToARGB(UseOption13SapphireBitmapSkin?C'0,235,245':C'45,105,255',255);
       for(int pixel=2;pixel<=plotWidth;pixel+=2)
       {
          double u=(double)pixel*n/plotWidth;
@@ -1528,7 +1529,7 @@ void UpdateEquityCurve()
       }
    }
    gEquityCanvas.FontSet("Arial",11,FW_BOLD);
-   gEquityCanvas.TextOut(10,7,"EA EQUITY CURVE",text);
+   gEquityCanvas.TextOut(10,7,UseOption13SapphireBitmapSkin?"EQUITY WAVE":"EA EQUITY CURVE",text);
    double netResult=cumulative-startEquity;
    string netText="NET "+(netResult>=0?"+":"")+DoubleToString(netResult,2);
    gEquityCanvas.TextOut(width-105,7,netText,netResult>=0?ColorToARGB(C'0,255,170',255):ColorToARGB(C'255,64,96',255));
@@ -1885,6 +1886,53 @@ string UIDuration(datetime opened)
    return StringFormat("%02d:%02d:%02d",seconds/3600,(seconds%3600)/60,seconds%60);
 }
 
+void UpdateOption13Dashboard()
+{
+   long cw=0,ch=0;ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,cw);ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,ch);
+   int chartW=(int)cw,chartH=(int)ch;if(chartW<900||chartH<500)return;
+   int leftX=15,topY=15,rightX=chartW-360,activeY=268;
+   UIBitmap("O13_SIGNAL_PANEL",leftX,topY,"::Images\\SignalForgePro13\\panel_signal.bmp");
+   UIBitmap("O13_ACCOUNT_PANEL",rightX,topY,"::Images\\SignalForgePro13\\panel_account.bmp");
+   UIBitmap("O13_ACTIVE_PANEL",rightX,activeY,"::Images\\SignalForgePro13\\panel_active.bmp");
+
+   UILabel("O13_SIGNAL_TITLE",leftX+152,topY+19,"SIGNAL MODULE",TextColor,PanelFontSize+2,"Segoe UI Semibold");
+   string state=gLongSignal?"BUY":(gShortSignal?"SELL":"WAIT");color stateColor=gLongSignal?ProfitColor:(gShortSignal?LossColor:AccentColor);
+   UILabel("O13_STATE",leftX+104,topY+151,state,stateColor,ValueFontSize+8,"Segoe UI Semibold");
+   UILabel("O13_STRENGTH",leftX+106,topY+184,"Strength "+DoubleToString(MathMax(gBuyScore,gSellScore),1),SecondaryTextColor,PanelFontSize);
+   UILabel("O13_SCORE_L",leftX+282,topY+76,"SCORE",SecondaryTextColor,PanelFontSize-1);
+   UILabel("O13_SCORE_V",leftX+284,topY+98,DoubleToString(MathMax(gBuyScore,gSellScore),1),AccentColor,ValueFontSize+1,"Segoe UI Semibold");
+   double rsi=iRSI(NULL,0,RSILength,PRICE_CLOSE,1),macd=iMACD(NULL,0,MACDFastLength,MACDSlowLength,MACDSignalLength,PRICE_CLOSE,MODE_MAIN,1);
+   UILabel("O13_RSI_L",leftX+328,topY+75,"RSI",TextColor,PanelFontSize+1);UILabel("O13_RSI_V",leftX+326,topY+113,DoubleToString(rsi,1),AccentColor,ValueFontSize+2);
+   UILabel("O13_MACD_L",leftX+318,topY+165,"MACD",TextColor,PanelFontSize+1);UILabel("O13_MACD_V",leftX+321,topY+203,DoubleToString(macd,2),AccentColor,ValueFontSize+2);
+   UILabel("O13_QUALITY",leftX+298,topY+258,"Signal Quality  "+IntegerToString(gCandleScore)+"/5",TextColor,PanelFontSize);
+
+   int type=-1,ticket=ActiveTicket(type);double entry=0,sl=0,tp=0,lots=0,profit=0;
+   if(ticket>0&&OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES)){entry=OrderOpenPrice();sl=OrderStopLoss();tp=OrderTakeProfit();lots=OrderLots();profit=OrderProfit()+OrderSwap()+OrderCommission();}
+   UILabel("O13_ENTRY_L",leftX+35,topY+326,"Entry:",TextColor,PanelFontSize);UILabel("O13_ENTRY_V",leftX+92,topY+326,entry>0?DoubleToString(entry,Digits):"-",AccentColor,PanelFontSize+1);
+   UILabel("O13_SL_L",leftX+35,topY+344,"S/L:",TextColor,PanelFontSize);UILabel("O13_SL_V",leftX+92,topY+344,sl>0?DoubleToString(sl,Digits):"-",LossColor,PanelFontSize+1);
+   UILabel("O13_TP_L",leftX+220,topY+344,"T/P:",TextColor,PanelFontSize);UILabel("O13_TP_V",leftX+275,topY+344,tp>0?DoubleToString(tp,Digits):"-",ProfitColor,PanelFontSize+1);
+   UILabel("O13_COUNTDOWN",leftX+285,topY+326,"M5  "+CurrentCandleCountdown(),WarningColor,PanelFontSize+1,"Segoe UI Semibold");
+
+   UILabel("O13_ACCOUNT_TITLE",rightX+101,topY+20,"ACCOUNT COCKPIT",TextColor,PanelFontSize+2,"Segoe UI Semibold");
+   double floating=AccountEquity()-AccountBalance();string accountLabels[6]={"Balance:","Equity:","Margin:","Free Margin:","Profit/Loss:","Overall:"};string accountValues[6];
+   accountValues[0]=DoubleToString(AccountBalance(),2);accountValues[1]=DoubleToString(AccountEquity(),2);accountValues[2]=DoubleToString(AccountMargin(),2);accountValues[3]=DoubleToString(AccountFreeMargin(),2);accountValues[4]=SignedValue(floating,2);accountValues[5]=DoubleToString(AccountEquity(),2);
+   for(int a=0;a<6;a++){int yy=topY+73+a*23;UILabel("O13_AL"+IntegerToString(a),rightX+32,yy,accountLabels[a],TextColor,PanelFontSize+1);color ac=(a==4?(floating>=0?ProfitColor:LossColor):(a==2?WarningColor:ProfitColor));UILabel("O13_AV"+IntegerToString(a),rightX+235,yy,accountValues[a],ac,ValueFontSize+1,"Segoe UI Semibold");}
+   bool paused=DailyLossReached()||(StopTradingAfterConsecutiveLosses&&MaximumConsecutiveLosses>0&&CurrentConsecutiveLosses()>=MaximumConsecutiveLosses);
+   if(ShowProtectionResetButton)UIButton(RESET_BUTTON_NAME,rightX+220,topY+207,102,22,paused?"RESET PAUSE":"RISK READY",paused?C'135,25,43':C'15,70,85',paused?LossColor:AccentColor);
+
+   UILabel("O13_ACTIVE_TITLE",rightX+102,activeY+20,"ACTIVE POSITION",TextColor,PanelFontSize+2,"Segoe UI Semibold");
+   string headers[6]={"TYPE","SYMBOL","LOTS","PRICE","S/L","T/P"};int hx[6]={25,70,137,177,231,280};
+   for(int h=0;h<6;h++)UILabel("O13_AH"+IntegerToString(h),rightX+hx[h],activeY+82,headers[h],SecondaryTextColor,PanelFontSize-1);
+   if(ticket>0)
+   {
+      string row[6];row[0]=type==OP_BUY?"BUY":"SELL";row[1]=Symbol();row[2]=DoubleToString(lots,2);row[3]=DoubleToString(entry,Digits);row[4]=DoubleToString(sl,Digits);row[5]=DoubleToString(tp,Digits);
+      for(int c=0;c<6;c++)UILabel("O13_AR"+IntegerToString(c),rightX+hx[c],activeY+111,row[c],c==0?(type==OP_BUY?ProfitColor:LossColor):TextColor,PanelFontSize-1);
+      UILabel("O13_PROFIT",rightX+230,activeY+143,"P/L "+SignedValue(profit,2),profit>=0?ProfitColor:LossColor,ValueFontSize+1,"Segoe UI Semibold");
+   }
+   else UILabel("O13_WAIT",rightX+87,activeY+170,"WAITING FOR SIGNAL",AccentColor,ValueFontSize+2,"Segoe UI Semibold");
+   ChartRedraw(0);
+}
+
 void UpdateDashboard()
 {
    if(!gLegacyDashboardCleared)
@@ -1893,6 +1941,7 @@ void UpdateDashboard()
       gLegacyDashboardCleared=true;
    }
    if(!ShowDashboard){DeletePanelObjects();return;}
+   if(UseOption13SapphireBitmapSkin){UpdateOption13Dashboard();return;}
 
    long cw=0,ch=0;ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,cw);ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,ch);
    int chartW=(int)cw,chartH=(int)ch;if(chartW<600||chartH<400)return;

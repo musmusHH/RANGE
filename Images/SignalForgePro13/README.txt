@@ -16,5 +16,8 @@ FILES
 - orb_buy.bmp: green circular BUY/up state
 - orb_sell.bmp: red circular SELL/down state
 - orb_neutral.bmp: cyan neutral/waiting state
+- panel_signal.bmp: complete 440x388 Signal Module skin
+- panel_account.bmp: complete 345x241 Account Cockpit skin
+- panel_active.bmp: complete 345x320 Active Position skin
 
-UseOption13SapphireBitmapSkin=true enables the assets. Set it false to use the native-object fallback UI.
+UseOption13SapphireBitmapSkin=true enables the complete Option 13 layout. Dynamic labels and values are overlaid with native OBJ_LABEL objects. Set it false to use the responsive native-object fallback UI.
