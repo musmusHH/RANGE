@@ -10,10 +10,6 @@
 #include <Canvas\Canvas.mqh>
 #resource "\\Images\\SignalForgePro13\\logo.bmp"
 #resource "\\Images\\SignalForgePro13\\corner.bmp"
-#resource "\\Images\\SignalForgePro13\\gauge_ring.bmp"
-#resource "\\Images\\SignalForgePro13\\gauge_buy.bmp"
-#resource "\\Images\\SignalForgePro13\\gauge_sell.bmp"
-#resource "\\Images\\SignalForgePro13\\gauge_candle.bmp"
 #resource "\\Images\\SignalForgePro13\\orb_buy.bmp"
 #resource "\\Images\\SignalForgePro13\\orb_sell.bmp"
 #resource "\\Images\\SignalForgePro13\\orb_neutral.bmp"
@@ -255,6 +251,7 @@ bool gShowProfitTracker=false;
 string FILTER_BUTTON_NAME="SF_EA_SIG_FILTER_BUTTON";
 string RESET_BUTTON_NAME="",TRACKER_BUTTON_NAME="";
 string gBuyOrbResource="",gSellOrbResource="";
+int gGaugeLastRSI=-1,gGaugeLastMACD=-1,gGaugeLastQuality=-1;
 
 int ResponsiveRightPanelWidth(int chartWidth)
 {
@@ -573,6 +570,49 @@ void CreateSignalOrbResource(bool buy)
    ResourceFree(resource);
    if(!ResourceCreate(resource,pixels,side,side,0,0,side,COLOR_FORMAT_ARGB_NORMALIZE))
       Print("Signal orb resource error: ",GetLastError());
+}
+
+void UpdateOption13NeonGauge(string id,int x,int y,double percent)
+{
+   int rounded=(int)MathRound(MathMax(0,MathMin(100,percent)));
+   int previous=id=="RSI"?gGaugeLastRSI:(id=="MACD"?gGaugeLastMACD:gGaugeLastQuality);
+   string objectName=PREFIX+"UI_BMP_NEON_"+id;
+   if(previous==rounded&&ObjectFind(0,objectName)>=0)
+   {
+      ObjectSetInteger(0,objectName,OBJPROP_XDISTANCE,x);ObjectSetInteger(0,objectName,OBJPROP_YDISTANCE,y);
+      return;
+   }
+   if(id=="RSI")gGaugeLastRSI=rounded;else if(id=="MACD")gGaugeLastMACD=rounded;else gGaugeLastQuality=rounded;
+   int side=68,center=34;uint pixels[];ArrayResize(pixels,side*side);ArrayInitialize(pixels,0);
+   double sweep=270.0*rounded/100.0;
+   uint base=ColorToARGB(C'20,54,76',255),edge=ColorToARGB(C'53,91,112',255);
+   uint neon=ColorToARGB(C'0,225,235',255),hot=ColorToARGB(C'125,255,255',255),glow=ColorToARGB(C'0,180,220',95);
+   for(int py=0;py<side;py++)for(int px=0;px<side;px++)
+   {
+      double dx=px-center+0.5,dy=py-center+0.5,d=MathSqrt(dx*dx+dy*dy);
+      double angle=MathArctan2(dy,dx)*180.0/3.141592653589793;
+      if(angle<0)angle+=360.0;double relative=angle-135.0;if(relative<0)relative+=360.0;
+      bool inTrack=(relative<=270.0),active=(inTrack&&relative<=sweep);
+      uint value=0;
+      if(inTrack&&d>=27&&d<=32)value=active?neon:base;
+      if(inTrack&&d>=26&&d<27)value=active?hot:edge;
+      if(active&&((d>=24&&d<26)||(d>32&&d<=34)))value=glow;
+      pixels[py*side+px]=value;
+   }
+   string resource="::SFP13_NEON_"+id+"_"+IntegerToString((int)ChartID());
+   ResourceFree(resource);
+   if(!ResourceCreate(resource,pixels,side,side,0,0,side,COLOR_FORMAT_ARGB_NORMALIZE))
+   {Print("Option 13 gauge resource error: ",GetLastError()," ",id);return;}
+   if(ObjectFind(0,objectName)<0)ObjectCreate(0,objectName,OBJ_BITMAP_LABEL,0,0,0);
+   ObjectSetInteger(0,objectName,OBJPROP_CORNER,CORNER_LEFT_UPPER);ObjectSetInteger(0,objectName,OBJPROP_XDISTANCE,x);ObjectSetInteger(0,objectName,OBJPROP_YDISTANCE,y);
+   ObjectSetString(0,objectName,OBJPROP_BMPFILE,0,resource);ObjectSetInteger(0,objectName,OBJPROP_BACK,false);ObjectSetInteger(0,objectName,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,objectName,OBJPROP_HIDDEN,true);
+}
+
+void FreeOption13GaugeResources()
+{
+   string suffix="_"+IntegerToString((int)ChartID());
+   ResourceFree("::SFP13_NEON_RSI"+suffix);ResourceFree("::SFP13_NEON_MACD"+suffix);ResourceFree("::SFP13_NEON_QUALITY"+suffix);
+   gGaugeLastRSI=-1;gGaugeLastMACD=-1;gGaugeLastQuality=-1;
 }
 
 void DrawSignalOrb(bool buy,int shift)
@@ -1902,16 +1942,33 @@ void UpdateOption13Dashboard()
    string state=gLongSignal?"BUY":(gShortSignal?"SELL":"WAIT");color stateColor=gLongSignal?ProfitColor:(gShortSignal?LossColor:AccentColor);
    UILabel("O13_STATE",leftX+104,topY+151,state,stateColor,ValueFontSize+8,"Segoe UI Semibold");
    UILabel("O13_STRENGTH",leftX+106,topY+184,"Strength "+DoubleToString(MathMax(gBuyScore,gSellScore),1),SecondaryTextColor,PanelFontSize);
-   // Option 13 replaces flat progress bars with recessed 3D circular gauges.
-   UIBitmap("O13_BUY_GAUGE",leftX+310,topY+66,"::Images\\SignalForgePro13\\gauge_buy.bmp");
-   UIBitmap("O13_SELL_GAUGE",leftX+310,topY+143,"::Images\\SignalForgePro13\\gauge_sell.bmp");
-   UIBitmap("O13_CANDLE_GAUGE",leftX+310,topY+220,"::Images\\SignalForgePro13\\gauge_candle.bmp");
-   UILabel("O13_BUY_L",leftX+280,topY+82,"BUY",ProfitColor,PanelFontSize,"Segoe UI Semibold");
-   UILabel("O13_BUY_V",leftX+330,topY+91,DoubleToString(gBuyScore,1),TextColor,ValueFontSize+1,"Segoe UI Semibold");
-   UILabel("O13_SELL_L",leftX+276,topY+159,"SELL",LossColor,PanelFontSize,"Segoe UI Semibold");
-   UILabel("O13_SELL_V",leftX+330,topY+168,DoubleToString(gSellScore,1),TextColor,ValueFontSize+1,"Segoe UI Semibold");
-   UILabel("O13_CANDLE_L",leftX+274,topY+236,"CNDL",WarningColor,PanelFontSize,"Segoe UI Semibold");
-   UILabel("O13_CANDLE_V",leftX+330,topY+245,IntegerToString(gCandleScore)+"/5",TextColor,ValueFontSize,"Segoe UI Semibold");
+   // Vertical score meter: 0..10 scale on the right and live value below.
+   double score10=MathMax(gBuyScore,gSellScore)/EnabledWeightTotal()*10.0;
+   score10=MathMax(0,MathMin(10,score10));int meterX=leftX+276,meterY=topY+83,meterH=198;
+   UIRect("O13_SCORE_TRACK",meterX,meterY,14,meterH,C'4,17,29',C'48,85,105');ObjectSetInteger(0,PREFIX+"UI_O13_SCORE_TRACK",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   int meterFill=(int)MathRound((meterH-4)*score10/10.0);
+   UIRect("O13_SCORE_FILL",meterX+3,meterY+meterH-2-meterFill,8,meterFill,C'0,220,230',C'105,255,255');ObjectSetInteger(0,PREFIX+"UI_O13_SCORE_FILL",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   UILabel("O13_SCORE_LABEL",leftX+264,topY+61,"SCORE",TextColor,PanelFontSize,"Segoe UI Semibold");
+   for(int tick=0;tick<=10;tick++)
+   {
+      int tickY=meterY+meterH-6-(int)MathRound((meterH-12)*tick/10.0);
+      UILabel("O13_SCORE_T"+IntegerToString(tick),leftX+296,tickY,IntegerToString(tick),SecondaryTextColor,PanelFontSize-2);
+   }
+   UILabel("O13_SCORE_NUMBER",leftX+270,topY+288,DoubleToString(score10,1),AccentColor,ValueFontSize+1,"Segoe UI Semibold");
+
+   // Real dynamic neon arcs. Each bitmap is regenerated when its percentage
+   // changes; these are not fixed painted-circle effects.
+   double rsi=iRSI(NULL,0,RSILength,PRICE_CLOSE,1);
+   double macd=iMACD(NULL,0,MACDFastLength,MACDSlowLength,MACDSignalLength,PRICE_CLOSE,MODE_MAIN,1);
+   double atrNow=iATR(NULL,0,MathMax(1,ATRLength),1);
+   double macdPercent=atrNow>0?MathMin(100,MathAbs(macd)/atrNow*100.0):0;
+   double qualityPercent=MathMax(0,MathMin(100,gCandleScore/5.0*100.0));
+   UpdateOption13NeonGauge("RSI",leftX+331,topY+61,rsi);
+   UpdateOption13NeonGauge("MACD",leftX+331,topY+146,macdPercent);
+   UpdateOption13NeonGauge("QUALITY",leftX+331,topY+231,qualityPercent);
+   UILabel("O13_RSI_L",leftX+350,topY+55,"RSI",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("O13_RSI_V",leftX+350,topY+87,DoubleToString(rsi,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UILabel("O13_MACD_L",leftX+343,topY+140,"MACD",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("O13_MACD_V",leftX+346,topY+172,DoubleToString(macdPercent,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UILabel("O13_QUALITY_L",leftX+326,topY+225,"SIGNAL QUALITY",TextColor,PanelFontSize-1,"Segoe UI Semibold");UILabel("O13_QUALITY_V",leftX+348,topY+257,DoubleToString(qualityPercent,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
 
    int type=-1,ticket=ActiveTicket(type);double entry=0,sl=0,tp=0,lots=0,profit=0;
    if(ticket>0&&OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES)){entry=OrderOpenPrice();sl=OrderStopLoss();tp=OrderTakeProfit();lots=OrderLots();profit=OrderProfit()+OrderSwap()+OrderCommission();}
@@ -2230,6 +2287,7 @@ void OnDeinit(const int reason)
    }
    DestroyEquityCurve();
    ObjectsDeleteAll(0,PREFIX);
+   FreeOption13GaugeResources();
    if(gBuyOrbResource!="")ResourceFree(gBuyOrbResource);
    if(gSellOrbResource!="")ResourceFree(gSellOrbResource);
 }

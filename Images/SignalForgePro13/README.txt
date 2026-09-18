@@ -12,10 +12,6 @@ The EA uses #resource directives, so these BMP assets are embedded into the comp
 FILES
 - logo.bmp: sapphire SF header emblem
 - corner.bmp: raised sapphire panel corner ornament
-- gauge_ring.bmp: reusable circular sapphire gauge
-- gauge_buy.bmp: recessed professional 3D BUY-score gauge
-- gauge_sell.bmp: recessed professional 3D SELL-score gauge
-- gauge_candle.bmp: recessed professional 3D candle-score gauge
 - orb_buy.bmp: green circular BUY/up state
 - orb_sell.bmp: red circular SELL/down state
 - orb_neutral.bmp: cyan neutral/waiting state
@@ -23,4 +19,4 @@ FILES
 - panel_account.bmp: complete 345x241 Account Cockpit skin
 - panel_active.bmp: complete 345x320 Active Position skin
 
-UseOption13SapphireBitmapSkin=true enables the complete Option 13 layout. Dynamic labels and values are overlaid with native OBJ_LABEL objects. Set it false to use the responsive native-object fallback UI.
+UseOption13SapphireBitmapSkin=true enables the complete Option 13 layout. Dynamic labels and values are overlaid with native OBJ_LABEL objects. The Signal Module includes a live vertical 0-10 score meter and three runtime-generated neon circular percentage gauges for RSI, MACD strength and Signal Quality. Their illuminated arcs are rebuilt as the percentages change; they are not fixed painted effects. Set the option false to use the responsive native-object fallback UI.
