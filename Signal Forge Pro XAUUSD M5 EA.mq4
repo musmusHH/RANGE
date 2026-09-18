@@ -8,6 +8,12 @@
 //+------------------------------------------------------------------+
 #property strict
 #include <Canvas\Canvas.mqh>
+#resource "\\Images\\SignalForgePro13\\logo.bmp"
+#resource "\\Images\\SignalForgePro13\\corner.bmp"
+#resource "\\Images\\SignalForgePro13\\gauge_ring.bmp"
+#resource "\\Images\\SignalForgePro13\\orb_buy.bmp"
+#resource "\\Images\\SignalForgePro13\\orb_sell.bmp"
+#resource "\\Images\\SignalForgePro13\\orb_neutral.bmp"
 
 //--- Trading
 input int    MagicNumber       = 26051601;
@@ -132,6 +138,7 @@ enum EA_CORNER { EA_Top_Right=0, EA_Bottom_Right=1, EA_Bottom_Left=2, EA_Top_Lef
 enum FILTER_PANEL_MODE { Show_All_Filters=0, Show_Activated_Filters_Only=1 };
 input bool ApplyProfessionalChartTheme = true;
 input bool ShowDashboard = true;
+input bool UseOption13SapphireBitmapSkin = true;
 input bool ShowLeftPanel = true;
 input bool ShowRightPanel = true;
 input bool ShowBottomPanel = true;
@@ -1729,6 +1736,17 @@ bool UIEnsureObject(string name,ENUM_OBJECT type)
    return true;
 }
 
+void UIBitmap(string id,int x,int y,string resource)
+{
+   if(!UseOption13SapphireBitmapSkin)return;
+   string name=PREFIX+"UI_BMP_"+id;
+   if(!UIEnsureObject(name,OBJ_BITMAP_LABEL))return;
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,MathMax(0,x));ObjectSetInteger(0,name,OBJPROP_YDISTANCE,MathMax(0,y));
+   ObjectSetString(0,name,OBJPROP_BMPFILE,0,resource);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,C'9,24,47');ObjectSetInteger(0,name,OBJPROP_ZORDER,230);
+}
+
 void UIRect(string id,int x,int y,int width,int height,color background,color border)
 {
    string name=PREFIX+"UI_"+id;if(!UIEnsureObject(name,OBJ_RECTANGLE_LABEL))return;
@@ -1746,6 +1764,7 @@ void CreatePanel(string id,int x,int y,int width,int height)
    UIRect(id+"_PANEL",x,y,width,height,PanelBackground,PanelBorder);
    ObjectSetInteger(0,PREFIX+"UI_"+id+"_PANEL",OBJPROP_BORDER_TYPE,BORDER_RAISED);
    UIRect(id+"_ACCENT",x,y,4,height,AccentColor,AccentColor);
+   UIBitmap(id+"_CORNER",x+width-30,y+height-30,"::Images\\SignalForgePro13\\corner.bmp");
 }
 
 void CreateRightPanel(string id,int rightDistance,int absoluteX,int y,int width,int height)
@@ -1763,6 +1782,7 @@ void CreateRightPanel(string id,int rightDistance,int absoluteX,int y,int width,
       ObjectSetInteger(0,panel,OBJPROP_XSIZE,width);ObjectSetInteger(0,panel,OBJPROP_YSIZE,height);ObjectSetInteger(0,panel,OBJPROP_BGCOLOR,PanelBackground);ObjectSetInteger(0,panel,OBJPROP_COLOR,PanelBorder);ObjectSetInteger(0,panel,OBJPROP_BORDER_TYPE,BORDER_RAISED);
    }
    UIRect(id+"_ACCENT",absoluteX,y,4,height,AccentColor,AccentColor);
+   UIBitmap(id+"_CORNER",absoluteX+width-30,y+height-30,"::Images\\SignalForgePro13\\corner.bmp");
 }
 
 void UILabel(string id,int x,int y,string text,color clr,int size,string font="Segoe UI")
@@ -1783,8 +1803,9 @@ void CreateHeader(string panelId,int x,int y,int width,string title,string subti
 {
    UIRect(panelId+"_HEADER",x+5,y+5,width-10,38,HeaderColor,HeaderColor);
    ObjectSetInteger(0,PREFIX+"UI_"+panelId+"_HEADER",OBJPROP_BORDER_TYPE,BORDER_RAISED);
-   UILabel(panelId+"_TITLE",x+15,y+10,title,TextColor,PanelFontSize+2,"Segoe UI Semibold");
-   UILabel(panelId+"_SUB",x+15,y+26,subtitle,SecondaryTextColor,PanelFontSize-1);
+   UIBitmap(panelId+"_LOGO",x+8,y+4,"::Images\\SignalForgePro13\\logo.bmp");
+   UILabel(panelId+"_TITLE",x+53,y+10,title,TextColor,PanelFontSize+2,"Segoe UI Semibold");
+   UILabel(panelId+"_SUB",x+53,y+26,subtitle,SecondaryTextColor,PanelFontSize-1);
 }
 
 void CreateStatusIndicator(string id,int x,int y,string status,color clr)
@@ -1940,9 +1961,18 @@ void UpdateDashboard()
       UIRect("LEFT_STATECARD",leftX+12,stateY,leftW-24,52,signalBg,signalBorder);
       ObjectSetInteger(0,signalCard,OBJPROP_BORDER_TYPE,BORDER_RAISED);
       string signal=gLongSignal?"BUY SIGNAL":(gShortSignal?"SELL SIGNAL":"NO SIGNAL");
-      if(gLongSignal||gShortSignal)UIWingdings("LEFT_SIGNAL_ICON",leftX+30,stateY+8,gLongSignal?241:242,TextColor,22);
-      else if(ObjectFind(0,PREFIX+"UI_LEFT_SIGNAL_ICON")>=0)ObjectSetString(0,PREFIX+"UI_LEFT_SIGNAL_ICON",OBJPROP_TEXT,"");
-      UILabel("LEFT_SIGNAL",leftX+(gLongSignal||gShortSignal?64:34),stateY+12,signal,TextColor,ValueFontSize+5,"Segoe UI Semibold");
+      if(UseOption13SapphireBitmapSkin)
+      {
+         string orbResource=gLongSignal?"::Images\\SignalForgePro13\\orb_buy.bmp":(gShortSignal?"::Images\\SignalForgePro13\\orb_sell.bmp":"::Images\\SignalForgePro13\\orb_neutral.bmp");
+         UIBitmap("LEFT_SIGNAL_ORB",leftX+20,stateY-2,orbResource);
+         UILabel("LEFT_SIGNAL",leftX+82,stateY+12,signal,TextColor,ValueFontSize+5,"Segoe UI Semibold");
+      }
+      else
+      {
+         if(gLongSignal||gShortSignal)UIWingdings("LEFT_SIGNAL_ICON",leftX+30,stateY+8,gLongSignal?241:242,TextColor,22);
+         else if(ObjectFind(0,PREFIX+"UI_LEFT_SIGNAL_ICON")>=0)ObjectSetString(0,PREFIX+"UI_LEFT_SIGNAL_ICON",OBJPROP_TEXT,"");
+         UILabel("LEFT_SIGNAL",leftX+(gLongSignal||gShortSignal?64:34),stateY+12,signal,TextColor,ValueFontSize+5,"Segoe UI Semibold");
+      }
       UILabel("LEFT_WAIT",leftX+245,stateY+18,gLongSignal||gShortSignal?"Valid closed-candle setup":"Waiting for a valid setup...",gLongSignal||gShortSignal?TextColor:SecondaryTextColor,PanelFontSize);
    }
    else ObjectsDeleteAll(0,PREFIX+"UI_LEFT");
@@ -2005,9 +2035,18 @@ void UpdateDashboard()
       ObjectSetInteger(0,PREFIX+"UI_BOTTOM_POSITION",OBJPROP_BORDER_TYPE,BORDER_RAISED);
       UICard("BOTTOM_PROFIT",bottomX+20+leftCardW,contentY,rightCardW,cardH);
       string side=activeTicket>0?(activeType==OP_BUY?"BUY SIGNAL":"SELL SIGNAL"):"WAITING FOR SIGNAL";
-      if(activeTicket>0)UIWingdings("BOTTOM_SIDE_ICON",bottomX+22,contentY+5,activeType==OP_BUY?241:242,TextColor,18);
-      else if(ObjectFind(0,PREFIX+"UI_BOTTOM_SIDE_ICON")>=0)ObjectSetString(0,PREFIX+"UI_BOTTOM_SIDE_ICON",OBJPROP_TEXT,"");
-      UILabel("BOTTOM_SIDE",bottomX+(activeTicket>0?50:24),contentY+9,side,TextColor,ValueFontSize+3,"Segoe UI Semibold");
+      if(UseOption13SapphireBitmapSkin)
+      {
+         string positionOrb=activeTicket>0?(activeType==OP_BUY?"::Images\\SignalForgePro13\\orb_buy.bmp":"::Images\\SignalForgePro13\\orb_sell.bmp"):"::Images\\SignalForgePro13\\orb_neutral.bmp";
+         UIBitmap("BOTTOM_SIGNAL_ORB",bottomX+14,contentY-1,positionOrb);
+         UILabel("BOTTOM_SIDE",bottomX+76,contentY+9,side,TextColor,ValueFontSize+3,"Segoe UI Semibold");
+      }
+      else
+      {
+         if(activeTicket>0)UIWingdings("BOTTOM_SIDE_ICON",bottomX+22,contentY+5,activeType==OP_BUY?241:242,TextColor,18);
+         else if(ObjectFind(0,PREFIX+"UI_BOTTOM_SIDE_ICON")>=0)ObjectSetString(0,PREFIX+"UI_BOTTOM_SIDE_ICON",OBJPROP_TEXT,"");
+         UILabel("BOTTOM_SIDE",bottomX+(activeTicket>0?50:24),contentY+9,side,TextColor,ValueFontSize+3,"Segoe UI Semibold");
+      }
       int levelY=contentY+36,levelCol=(leftCardW-24)/3;string pl[3]={"ENTRY","SL","TP"};string pv[3];pv[0]=entry>0?DoubleToString(entry,Digits):"-";pv[1]=sl>0?DoubleToString(sl,Digits):"-";pv[2]=tp>0?DoubleToString(tp,Digits):"-";
       for(int p=0;p<3;p++){int lx=bottomX+24+p*levelCol;UILabel("BOTTOM_PL"+IntegerToString(p),lx,levelY,pl[p],SecondaryTextColor,PanelFontSize-1);UILabel("BOTTOM_PV"+IntegerToString(p),lx,levelY+13,pv[p],p==1?LossColor:(p==2?ProfitColor:TextColor),PanelFontSize);}
       int px=bottomX+32+leftCardW;UILabel("BOTTOM_CURPL",px,contentY+9,"CURRENT P/L",SecondaryTextColor,PanelFontSize);UILabel("BOTTOM_CURPV",px+rightCardW-95,contentY+7,activeTicket>0?SignedValue(tradePL,2):"0.00",tradePL>=0?ProfitColor:LossColor,ValueFontSize+3,"Segoe UI Semibold");
