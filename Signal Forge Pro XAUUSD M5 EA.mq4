@@ -11,6 +11,9 @@
 #resource "\\Images\\SignalForgePro13\\logo.bmp"
 #resource "\\Images\\SignalForgePro13\\corner.bmp"
 #resource "\\Images\\SignalForgePro13\\gauge_ring.bmp"
+#resource "\\Images\\SignalForgePro13\\gauge_buy.bmp"
+#resource "\\Images\\SignalForgePro13\\gauge_sell.bmp"
+#resource "\\Images\\SignalForgePro13\\gauge_candle.bmp"
 #resource "\\Images\\SignalForgePro13\\orb_buy.bmp"
 #resource "\\Images\\SignalForgePro13\\orb_sell.bmp"
 #resource "\\Images\\SignalForgePro13\\orb_neutral.bmp"
@@ -1899,12 +1902,16 @@ void UpdateOption13Dashboard()
    string state=gLongSignal?"BUY":(gShortSignal?"SELL":"WAIT");color stateColor=gLongSignal?ProfitColor:(gShortSignal?LossColor:AccentColor);
    UILabel("O13_STATE",leftX+104,topY+151,state,stateColor,ValueFontSize+8,"Segoe UI Semibold");
    UILabel("O13_STRENGTH",leftX+106,topY+184,"Strength "+DoubleToString(MathMax(gBuyScore,gSellScore),1),SecondaryTextColor,PanelFontSize);
-   UILabel("O13_SCORE_L",leftX+282,topY+76,"SCORE",SecondaryTextColor,PanelFontSize-1);
-   UILabel("O13_SCORE_V",leftX+284,topY+98,DoubleToString(MathMax(gBuyScore,gSellScore),1),AccentColor,ValueFontSize+1,"Segoe UI Semibold");
-   double rsi=iRSI(NULL,0,RSILength,PRICE_CLOSE,1),macd=iMACD(NULL,0,MACDFastLength,MACDSlowLength,MACDSignalLength,PRICE_CLOSE,MODE_MAIN,1);
-   UILabel("O13_RSI_L",leftX+328,topY+75,"RSI",TextColor,PanelFontSize+1);UILabel("O13_RSI_V",leftX+326,topY+113,DoubleToString(rsi,1),AccentColor,ValueFontSize+2);
-   UILabel("O13_MACD_L",leftX+318,topY+165,"MACD",TextColor,PanelFontSize+1);UILabel("O13_MACD_V",leftX+321,topY+203,DoubleToString(macd,2),AccentColor,ValueFontSize+2);
-   UILabel("O13_QUALITY",leftX+298,topY+258,"Signal Quality  "+IntegerToString(gCandleScore)+"/5",TextColor,PanelFontSize);
+   // Option 13 replaces flat progress bars with recessed 3D circular gauges.
+   UIBitmap("O13_BUY_GAUGE",leftX+310,topY+66,"::Images\\SignalForgePro13\\gauge_buy.bmp");
+   UIBitmap("O13_SELL_GAUGE",leftX+310,topY+143,"::Images\\SignalForgePro13\\gauge_sell.bmp");
+   UIBitmap("O13_CANDLE_GAUGE",leftX+310,topY+220,"::Images\\SignalForgePro13\\gauge_candle.bmp");
+   UILabel("O13_BUY_L",leftX+280,topY+82,"BUY",ProfitColor,PanelFontSize,"Segoe UI Semibold");
+   UILabel("O13_BUY_V",leftX+330,topY+91,DoubleToString(gBuyScore,1),TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UILabel("O13_SELL_L",leftX+276,topY+159,"SELL",LossColor,PanelFontSize,"Segoe UI Semibold");
+   UILabel("O13_SELL_V",leftX+330,topY+168,DoubleToString(gSellScore,1),TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UILabel("O13_CANDLE_L",leftX+274,topY+236,"CNDL",WarningColor,PanelFontSize,"Segoe UI Semibold");
+   UILabel("O13_CANDLE_V",leftX+330,topY+245,IntegerToString(gCandleScore)+"/5",TextColor,ValueFontSize,"Segoe UI Semibold");
 
    int type=-1,ticket=ActiveTicket(type);double entry=0,sl=0,tp=0,lots=0,profit=0;
    if(ticket>0&&OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES)){entry=OrderOpenPrice();sl=OrderStopLoss();tp=OrderTakeProfit();lots=OrderLots();profit=OrderProfit()+OrderSwap()+OrderCommission();}

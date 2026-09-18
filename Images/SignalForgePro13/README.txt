@@ -13,6 +13,9 @@ FILES
 - logo.bmp: sapphire SF header emblem
 - corner.bmp: raised sapphire panel corner ornament
 - gauge_ring.bmp: reusable circular sapphire gauge
+- gauge_buy.bmp: recessed professional 3D BUY-score gauge
+- gauge_sell.bmp: recessed professional 3D SELL-score gauge
+- gauge_candle.bmp: recessed professional 3D candle-score gauge
 - orb_buy.bmp: green circular BUY/up state
 - orb_sell.bmp: red circular SELL/down state
 - orb_neutral.bmp: cyan neutral/waiting state
