@@ -68,6 +68,11 @@ input double VolumeMultiplier = 1.20;
 input bool   UseRiskPercentLot = false;
 input bool   UseMaximumMoneyRisk = true;
 input double MaximumRiskPerTradeMoney = 12.00; // practical Exness 0.01-lot cap; lower values can reject every ATR trade
+input double RiskSafetyBufferPercent = 5.0;    // reserves part of the selected money-risk ceiling
+input double MaximumLotLimit = 1.00;
+input double MinimumMarginLevelPercent = 150.0;
+input bool   UseMinimumRiskRewardFilter = false;
+input double MinimumRiskReward = 1.00;
 input bool   UseBreakEven = true;
 input double BreakEvenStartPoints = 400.0;
 input double BreakEvenOffsetPoints = 50.0;
@@ -130,6 +135,9 @@ input bool ShowDashboard = true;
 input bool ShowLeftPanel = true;
 input bool ShowRightPanel = true;
 input bool ShowBottomPanel = true;
+input bool AutoSizeDashboard = true;
+input int  MinimumVisibleChartWidth = 300;
+input bool ShowProtectionResetButton = true;
 input int  LeftPanelWidth = 580;
 input int  LeftPanelHeight = 370;
 input int  RightPanelWidth = 470;
@@ -187,7 +195,8 @@ input int  EquityCurveX = 10;
 input int  EquityCurveY = 10;
 input int  EquityCurveHeight = 126;
 input bool DrawEntrySLTPLines = true;
-input bool DrawClosedTradeResults = true;
+input bool   DrawClosedTradeResults = true;
+input bool   DetailedResultCards = true;
 input int  MaximumResultBoxes = 50;
 input int  ResultBoxPaddingPixels = 8;
 input int  ResultCardCandleGapPixels = 20;
@@ -226,8 +235,11 @@ int gPersistentSyncHistory=-1;
 datetime gTrackerDay=0;
 double gTrackerGrossProfit=0,gTrackerGrossLoss=0,gTrackerMaxDD=0;
 double gTrackerDaily=0,gTrackerWeekly=0,gTrackerMonthly=0,gTrackerTotal=0;
-double gTrackerDayProfit[5],gTrackerDayLots[5];
+double gTrackerDayProfit[5],gTrackerDayLots[5],gTrackerDayGross[5],gTrackerDayCommission[5];
+datetime gProtectionResetTime=0;
+bool gShowProfitTracker=false;
 string FILTER_BUTTON_NAME="SF_EA_SIG_FILTER_BUTTON";
+string RESET_BUTTON_NAME="",TRACKER_BUTTON_NAME="";
 string gBuyOrbResource="",gSellOrbResource="";
 
 int ResponsiveRightPanelWidth(int chartWidth)
@@ -805,7 +817,9 @@ double RiskAdjustedLots(double requested,double entry,double sl,double &moneyRis
    double riskPerLot=MoneyRiskAtStop(1.0,entry,sl);
    if(riskPerLot<=0){moneyRisk=-1;return 0;}
    double lots=UseRiskPercentLot?(AccountBalance()*MathMax(0,RiskPercent)/100.0)/riskPerLot:requested;
-   if(UseMaximumMoneyRisk&&MaximumRiskPerTradeMoney>0)lots=MathMin(lots,MaximumRiskPerTradeMoney/riskPerLot);
+   double safetyFactor=1.0-MathMax(0,MathMin(95,RiskSafetyBufferPercent))/100.0;
+   if(UseMaximumMoneyRisk&&MaximumRiskPerTradeMoney>0)lots=MathMin(lots,MaximumRiskPerTradeMoney*safetyFactor/riskPerLot);
+   if(MaximumLotLimit>0)lots=MathMin(lots,MaximumLotLimit);
    lots=NormalizeLots(lots);
    if(lots<=0)
    {
@@ -856,6 +870,9 @@ bool OpenPosition(int type)
    double tpDistance=TakeProfitMode==TP_By_Points?MathMax(Point,TakeProfitPoints*Point):atr*MathMax(0.1,TakeProfitATR);
    double tp=UseRiskRewardTP?(type==OP_BUY?entry+slDistance*RiskRewardRatio:entry-slDistance*RiskRewardRatio):(type==OP_BUY?entry+MathMax(tpDistance,minimum):entry-MathMax(tpDistance,minimum));
    tp=NormalizeDouble(tp,Digits);
+   double plannedRR=slDistance>0?MathAbs(tp-entry)/slDistance:0;
+   if(UseMinimumRiskRewardFilter&&plannedRR<MinimumRiskReward){gLastAction="BLOCKED: R:R "+DoubleToString(plannedRR,2);return false;}
+   if(AccountMargin()>0&&MinimumMarginLevelPercent>0&&AccountEquity()/AccountMargin()*100.0<MinimumMarginLevelPercent){gLastAction="BLOCKED: MARGIN LEVEL";return false;}
    double moneyRisk=0,lots=RiskAdjustedLots(FixedLots,entry,sl,moneyRisk);
    if(lots<=0){gLastAction="BLOCKED: MIN LOT RISK $"+DoubleToString(moneyRisk,2);Print(gLastAction);return false;}
    if(AccountFreeMarginCheck(Symbol(),type,lots)<=0){gLastAction="BLOCKED: FREE MARGIN";Print(gLastAction," Error=",GetLastError());return false;}
@@ -890,13 +907,27 @@ bool OpenPosition(int type)
    return true;
 }
 
-double TodayClosedPL()
+datetime ProtectionPeriodStart()
 {
-   datetime start=StrToTime(TimeToString(TimeCurrent(),TIME_DATE));double total=0;
+   datetime day=StrToTime(TimeToString(TimeCurrent(),TIME_DATE));
+   return (gProtectionResetTime>=day&&gProtectionResetTime<=TimeCurrent())?gProtectionResetTime:day;
+}
+
+string ProtectionResetKey()
+{
+   return "SFP.RESET."+IntegerToString(AccountNumber())+"."+IntegerToString(MagicNumber)+"."+Symbol();
+}
+
+double ClosedPLFrom(datetime start)
+{
+   double total=0;
    for(int i=OrdersHistoryTotal()-1;i>=0;i--)if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
       if(OrderSymbol()==Symbol()&&OrderMagicNumber()==MagicNumber&&(OrderType()==OP_BUY||OrderType()==OP_SELL)&&OrderCloseTime()>=start)total+=OrderProfit()+OrderSwap()+OrderCommission();
    return total;
 }
+
+double TodayClosedPL(){return ClosedPLFrom(StrToTime(TimeToString(TimeCurrent(),TIME_DATE)));}
+double ProtectionClosedPL(){return ClosedPLFrom(ProtectionPeriodStart());}
 
 int CurrentConsecutiveLosses()
 {
@@ -904,6 +935,7 @@ int CurrentConsecutiveLosses()
    for(int i=OrdersHistoryTotal()-1;i>=0;i--)if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
    {
       if(OrderSymbol()!=Symbol()||OrderMagicNumber()!=MagicNumber||(OrderType()!=OP_BUY&&OrderType()!=OP_SELL))continue;
+      if(OrderCloseTime()<ProtectionPeriodStart())break;
       double result=OrderProfit()+OrderSwap()+OrderCommission();if(result<0)losses++;else if(result>0)break;
    }
    return losses;
@@ -921,7 +953,7 @@ bool SessionAllowed()
 bool DailyLossReached()
 {
    if(!StopTradingAfterDailyLoss)return false;
-   double daily=TodayClosedPL(),loss=MathMax(0,-daily),dayStartBalance=AccountBalance()-daily;
+   double daily=ProtectionClosedPL(),loss=MathMax(0,-daily),dayStartBalance=AccountBalance()-daily;
    return (MaximumDailyLossMoney>0&&loss>=MaximumDailyLossMoney)||(MaximumDailyLossPercent>0&&dayStartBalance>0&&loss/dayStartBalance*100.0>=MaximumDailyLossPercent);
 }
 
@@ -1078,6 +1110,8 @@ void HideResultCardOffscreen(string base)
    MoveResultObjectOffscreen(base+"SUB");
    MoveResultObjectOffscreen(base+"TITLE");
    MoveResultObjectOffscreen(base+"DETAIL");
+   MoveResultObjectOffscreen(base+"EXTRA");MoveResultObjectOffscreen(base+"EXTRA_TEXT");
+   MoveResultObjectOffscreen(base+"FEES");MoveResultObjectOffscreen(base+"FEES_TEXT");
    ObjectDelete(0,base+"LINK_V");
    ObjectDelete(0,base+"LINK_H");
 }
@@ -1145,6 +1179,12 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    string side=(OrderType()==OP_BUY)?"BUY ":"SELL ";
    string headline=(won?"WIN  ":"LOSS  ")+SignedValue(net,2);
    string detail=side+DoubleToString(OrderLots(),2)+"  "+SignedValue(MathRound(points),0)+" pts";
+   string initialKey="SFP.ISL."+IntegerToString(AccountNumber())+"."+IntegerToString(MagicNumber)+"."+IntegerToString(ticket);
+   double initialSL=GlobalVariableCheck(initialKey)?GlobalVariableGet(initialKey):OrderStopLoss();
+   double initialDistance=initialSL>0?MathAbs(OrderOpenPrice()-initialSL):0;
+   double rMultiple=initialDistance>0?((OrderType()==OP_BUY?OrderClosePrice()-OrderOpenPrice():OrderOpenPrice()-OrderClosePrice())/initialDistance):0;
+   string extra="E "+DoubleToString(OrderOpenPrice(),Digits)+"  X "+DoubleToString(OrderClosePrice(),Digits)+"  R "+SignedValue(rMultiple,2);
+   string fees="SL "+DoubleToString(initialSL,Digits)+" TP "+DoubleToString(OrderTakeProfit(),Digits)+" C "+SignedValue(OrderCommission(),2)+" N "+SignedValue(net,2);
 
    int mainFont=MathMax(8,DashboardFontSize);
    int subFont=MathMax(7,DashboardFontSize-1);
@@ -1153,10 +1193,13 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    // and avoids the oversized chart-time rectangles used previously.
    int charPixels=MathMax(6,(mainFont*7)/10);
    int longest=MathMax(StringLen(headline),StringLen(detail));
+   if(DetailedResultCards)longest=MathMax(longest,MathMax(StringLen(extra),StringLen(fees)));
    int width=longest*charPixels+padding*2+4;
    int mainHeight=mainFont+14;
    int subHeight=subFont+12;
-   int height=mainHeight+subHeight;
+   int extraHeight=DetailedResultCards?subFont+11:0;
+   int feesHeight=DetailedResultCards?subFont+11:0;
+   int height=mainHeight+subHeight+extraHeight+feesHeight;
 
    long chartWidth=0,chartHeight=0;
    ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartWidth);
@@ -1231,6 +1274,15 @@ void DrawOneClosedResult(int &usedX[],int &usedY[],int &usedW[],int &usedH[],int
    else {ObjectDelete(0,base+"LINK_V");ObjectDelete(0,base+"LINK_H");}
    ResultCardRow(base+"MAIN",base+"TITLE",left,top,width,mainHeight,headline,mainBg,border,mainFont,padding);
    ResultCardRow(base+"SUB",base+"DETAIL",left,top+mainHeight,width,subHeight,detail,subBg,border,subFont,padding);
+   if(DetailedResultCards)
+   {
+      ResultCardRow(base+"EXTRA",base+"EXTRA_TEXT",left,top+mainHeight+subHeight,width,extraHeight,extra,C'19,46,78',border,subFont,padding);
+      ResultCardRow(base+"FEES",base+"FEES_TEXT",left,top+mainHeight+subHeight+extraHeight,width,feesHeight,fees,C'12,31,55',border,subFont,padding);
+   }
+   else
+   {
+      MoveResultObjectOffscreen(base+"EXTRA");MoveResultObjectOffscreen(base+"EXTRA_TEXT");MoveResultObjectOffscreen(base+"FEES");MoveResultObjectOffscreen(base+"FEES_TEXT");
+   }
 
    string marker=base+"MARK";
    EnsureResultCardObject(marker,OBJ_ARROW);
@@ -1522,6 +1574,7 @@ void UpdateTrackerCache()
    gTrackerGrossProfit=0;gTrackerGrossLoss=0;gTrackerMaxDD=0;
    gTrackerDaily=0;gTrackerWeekly=0;gTrackerMonthly=0;gTrackerTotal=0;
    ArrayInitialize(gTrackerDayProfit,0.0);ArrayInitialize(gTrackerDayLots,0.0);
+   ArrayInitialize(gTrackerDayGross,0.0);ArrayInitialize(gTrackerDayCommission,0.0);
    int weekday=TimeDayOfWeek(day); // Sunday=0
    int daysFromMonday=(weekday==0)?6:weekday-1;
    datetime weekStart=day-daysFromMonday*86400;
@@ -1542,7 +1595,11 @@ void UpdateTrackerCache()
       for(int d=0;d<5;d++)
       {
          datetime ds=day-d*86400;
-         if(closed>=ds && closed<ds+86400){gTrackerDayProfit[d]+=result;gTrackerDayLots[d]+=OrderLots();break;}
+         if(closed>=ds && closed<ds+86400)
+         {
+            gTrackerDayGross[d]+=OrderProfit()+OrderSwap();gTrackerDayCommission[d]+=OrderCommission();
+            gTrackerDayProfit[d]+=result;gTrackerDayLots[d]+=OrderLots();break;
+         }
       }
    }
 
@@ -1729,6 +1786,15 @@ void CreateStatusIndicator(string id,int x,int y,string status,color clr)
    UIRect(id+"_DOT",x,y+3,7,7,clr,clr);UILabel(id+"_TEXT",x+13,y,status,clr,PanelFontSize,"Segoe UI Semibold");
 }
 
+void UIButton(string name,int x,int y,int width,int height,string text,color background,color border)
+{
+   if(!UIEnsureObject(name,OBJ_BUTTON))return;
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,width);ObjectSetInteger(0,name,OBJPROP_YSIZE,height);ObjectSetInteger(0,name,OBJPROP_BGCOLOR,background);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,TextColor);ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,border);ObjectSetInteger(0,name,OBJPROP_STATE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);ObjectSetString(0,name,OBJPROP_FONT,"Arial Bold");ObjectSetInteger(0,name,OBJPROP_FONTSIZE,7);ObjectSetString(0,name,OBJPROP_TEXT,text);
+}
+
 void CreateValueLabel(string id,int x,int y,string label,string value,color valueColor)
 {
    UILabel(id+"_LABEL",x,y,label,SecondaryTextColor,PanelFontSize-1);
@@ -1803,9 +1869,19 @@ void UpdateDashboard()
 
    long cw=0,ch=0;ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,cw);ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0,ch);
    int chartW=(int)cw,chartH=(int)ch;if(chartW<600||chartH<400)return;
-   int leftW=(int)MathMin(MathMax(480,LeftPanelWidth),(chartW-LeftMargin-RightMargin-20)*0.55);
+   int leftW=(int)MathMin(MathMax(440,LeftPanelWidth),(chartW-LeftMargin-RightMargin-20)*0.55);
    int rightW=ResponsiveRightPanelWidth(chartW);
-   int leftH=(int)MathMax(340,LeftPanelHeight),rightH=(int)MathMax(340,RightPanelHeight);
+   if(AutoSizeDashboard)
+   {
+      int maximumCombined=(int)MathMax(760,chartW-LeftMargin-RightMargin-MathMax(180,MinimumVisibleChartWidth));
+      if(leftW+rightW>maximumCombined)
+      {
+         double scale=(double)maximumCombined/(leftW+rightW);
+         leftW=(int)MathMax(420,leftW*scale);rightW=(int)MathMax(340,rightW*scale);
+      }
+   }
+   int leftH=(int)MathMax(340,LeftPanelHeight),rightH=(int)MathMax(300,RightPanelHeight);
+   if(AutoSizeDashboard)rightH=(int)MathMin(rightH,MathMax(300,chartH-TopMargin-BottomMargin-PositionPanelStackGap-150));
    int leftX=LeftMargin,leftY=TopMargin,rightX=chartW-RightMargin-rightW,rightY=TopMargin;
    // Stack Active Position directly beneath Account & Performance. It uses
    // exactly the same X coordinate and width, opening the chart center.
@@ -1834,6 +1910,7 @@ void UpdateDashboard()
    {
       CreatePanel("LEFT",leftX,leftY,leftW,leftH);CreateHeader("LEFT",leftX,leftY,leftW,"SIGNAL FORGE PRO",Symbol()+"  •  "+CurrentTimeframeText());
       UILabel("LEFT_DATE",leftX+leftW-105,leftY+10,TimeToString(TimeCurrent(),TIME_DATE),SecondaryTextColor,PanelFontSize-1);
+      UILabel("LEFT_COUNTDOWN",leftX+leftW-225,leftY+27,"CANDLE "+CurrentCandleCountdown(),WarningColor,PanelFontSize,"Segoe UI Semibold");
       CreateStatusIndicator("LEFT_RUN",leftX+leftW-105,leftY+27,tradeSafe?"EA RUNNING":"EA PAUSED",tradeSafe?ProfitColor:WarningColor);
       int cardY=leftY+54,scoreW=(int)(leftW*0.35),marketW=(int)(leftW*0.29),indicatorW=leftW-scoreW-marketW-38;
       UICard("LEFT_SCORE",leftX+12,cardY,scoreW,leftH-132);UICard("LEFT_MARKET",leftX+18+scoreW,cardY,marketW,leftH-132);UICard("LEFT_IND",leftX+24+scoreW+marketW,cardY,indicatorW,leftH-132);
@@ -1868,6 +1945,7 @@ void UpdateDashboard()
    {
       CreateRightPanel("RIGHT",RightMargin,rightX,rightY,rightW,rightH);CreateHeader("RIGHT",rightX,rightY,rightW,"ACCOUNT & PERFORMANCE","RISK CONTROL / STATISTICS");
       CreateStatusIndicator("RIGHT_LIVE",rightX+rightW-70,rightY+18,"LIVE",ProfitColor);
+      UIButton(TRACKER_BUTTON_NAME,rightX+rightW-170,rightY+10,82,24,gShowProfitTracker?"STATISTICS":"TRACKER",C'20,70,125',AccentColor);
       int gap=8,inner=rightW-24,half=(inner-gap)/2,top=rightY+54;
       UICard("RIGHT_ACCOUNT",rightX+12,top,half,112);UICard("RIGHT_RISK",rightX+12+half+gap,top,half,112);
       int ax=rightX+24,ay=top+12;UILabel("RIGHT_AHEAD",ax,ay,"ACCOUNT",TextColor,PanelFontSize,"Segoe UI Semibold");ay+=24;
@@ -1878,13 +1956,34 @@ void UpdateDashboard()
       UILabel("RIGHT_RL0",rx,ry,"Trade Risk",SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_RV0",rx+half-75,ry,DoubleToString(riskPct,2)+"%",riskPct<2?ProfitColor:WarningColor,PanelFontSize);ry+=18;
       UILabel("RIGHT_RL1",rx,ry,"Max Risk",SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_RV1",rx+half-75,ry,"$"+DoubleToString(MaximumRiskPerTradeMoney,2),TextColor,PanelFontSize);ry+=18;
       UILabel("RIGHT_RL2",rx,ry,"Consec. Losses",SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_RV2",rx+half-75,ry,IntegerToString(CurrentConsecutiveLosses())+" / "+IntegerToString(MaximumConsecutiveLosses),CurrentConsecutiveLosses()>=MaximumConsecutiveLosses?LossColor:TextColor,PanelFontSize);ry+=18;
-      UILabel("RIGHT_RL3",rx,ry,"Stop Trading",SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_RV3",rx+half-75,ry,DailyLossReached()?"ON":"OFF",DailyLossReached()?LossColor:NeutralColor,PanelFontSize);
-      int middle=top+120,statsH=142;UICard("RIGHT_STATS",rightX+12,middle,half,statsH);UICard("RIGHT_DAILY",rightX+12+half+gap,middle,half,78);UICard("RIGHT_HOURS",rightX+12+half+gap,middle+86,half,56);
+      bool protectionPaused=DailyLossReached()||(StopTradingAfterConsecutiveLosses&&MaximumConsecutiveLosses>0&&CurrentConsecutiveLosses()>=MaximumConsecutiveLosses);
+      UILabel("RIGHT_RL3",rx,ry,"Trade Lock",SecondaryTextColor,PanelFontSize-1);
+      if(ShowProtectionResetButton)UIButton(RESET_BUTTON_NAME,rx+half-96,ry-3,90,19,protectionPaused?"RESET PAUSE":"RESET READY",protectionPaused?C'145,35,45':C'32,65,95',protectionPaused?LossColor:AccentColor);
+      else UILabel("RIGHT_RV3",rx+half-75,ry,protectionPaused?"ON":"OFF",protectionPaused?LossColor:NeutralColor,PanelFontSize);
+      int middle=top+120,statsH=142;
+      if(!gShowProfitTracker)
+      {
+      UICard("RIGHT_STATS",rightX+12,middle,half,statsH);UICard("RIGHT_DAILY",rightX+12+half+gap,middle,half,78);UICard("RIGHT_HOURS",rightX+12+half+gap,middle+86,half,56);
       int tx=rightX+24,ty=middle+12;UILabel("RIGHT_SHEAD",tx,ty,"STATISTICS",TextColor,PanelFontSize,"Segoe UI Semibold");ty+=23;
       string tl[6]={"Total Trades","Win Rate","Profit Factor","Net Profit","Avg Win","Avg Loss"};string tv[6];tv[0]=IntegerToString(gTrackerTrades);tv[1]=DoubleToString(winRate,1)+"%";tv[2]=DoubleToString(profitFactor,2);tv[3]=SignedValue(gTrackerTotal,2);tv[4]=gTrackerWins>0?"+"+DoubleToString(gTrackerGrossProfit/gTrackerWins,2):"0.00";int losses=gTrackerTrades-gTrackerWins;tv[5]=losses>0?"-"+DoubleToString(gTrackerGrossLoss/losses,2):"0.00";
       for(int t=0;t<6;t++){UILabel("RIGHT_TL"+IntegerToString(t),tx,ty,tl[t],SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_TV"+IntegerToString(t),tx+half-90,ty,tv[t],t==3?(gTrackerTotal>=0?ProfitColor:LossColor):(t==4?ProfitColor:(t==5?LossColor:TextColor)),PanelFontSize);ty+=17;}
       int dx=rightX+24+half+gap,dy=middle+12;UILabel("RIGHT_DHEAD",dx,dy,"DAILY",TextColor,PanelFontSize,"Segoe UI Semibold");dy+=22;UILabel("RIGHT_DPL",dx,dy,"Daily P/L",SecondaryTextColor,PanelFontSize-1);UILabel("RIGHT_DPV",dx+half-82,dy,SignedValue(today,2),today>=0?ProfitColor:LossColor,PanelFontSize);dy+=19;UIProgressBar("RIGHT_DAYBAR",dx,dy,half-24,MathMax(0,today),MathMax(1,DailyProfitTargetDisplay),ProfitColor);
       int hx=rightX+24+half+gap,hy=middle+98;UILabel("RIGHT_HHEAD",hx,hy,"TRADING HOURS",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("RIGHT_HVAL",hx,hy+22,CurrentSessionText(),SecondaryTextColor,PanelFontSize);
+      }
+      else
+      {
+         UICard("RIGHT_TRACKER",rightX+12,middle,rightW-24,statsH);
+         UILabel("RIGHT_TRACK_TITLE",rightX+22,middle+8,"PROFIT TRACKER — LAST 5 DAYS",AccentColor,PanelFontSize,"Segoe UI Semibold");
+         int widths[6]={70,35,52,45,55,55};string heads[6]={"DATE","LOT","GROSS","GAIN","COMM","NET"};int cx=rightX+20;
+         for(int h=0;h<6;h++){UILabel("RIGHT_TRACK_H"+IntegerToString(h),cx,middle+28,heads[h],SecondaryTextColor,PanelFontSize-2);cx+=widths[h];}
+         double gainBase=MathMax(1,AccountBalance());
+         for(int d=0;d<5;d++)
+         {
+            int rowY=middle+47+d*17;datetime date=gTrackerDay-d*86400;double gain=gTrackerDayProfit[d]/gainBase*100.0;cx=rightX+20;
+            string vals[6];vals[0]=TimeToString(date,TIME_DATE);vals[1]=DoubleToString(gTrackerDayLots[d],2);vals[2]=SignedValue(gTrackerDayGross[d],2);vals[3]=SignedValue(gain,1)+"%";vals[4]=SignedValue(gTrackerDayCommission[d],2);vals[5]=SignedValue(gTrackerDayProfit[d],2);
+            for(int c=0;c<6;c++){UILabel("RIGHT_TRACK_"+IntegerToString(d)+"_"+IntegerToString(c),cx,rowY,vals[c],c>=2?(gTrackerDayProfit[d]>=0?ProfitColor:LossColor):TextColor,PanelFontSize-2);cx+=widths[c];}
+         }
+      }
       int riskY=rightY+rightH-57;UICard("RIGHT_RISKBAR",rightX+12,riskY,rightW-24,43);UILabel("RIGHT_RISKLEVEL",rightX+24,riskY+8,"RISK LEVEL",TextColor,PanelFontSize,"Segoe UI Semibold");UILabel("RIGHT_RISKPCT",rightX+rightW-65,riskY+8,DoubleToString(riskPct,2)+"%",riskPct<2?ProfitColor:WarningColor,PanelFontSize);UIProgressBar("RIGHT_LEVELBAR",rightX+24,riskY+26,rightW-48,riskPct,MathMax(2,MaximumDailyLossPercent),riskPct<2?ProfitColor:WarningColor);
    }
    else ObjectsDeleteAll(0,PREFIX+"UI_RIGHT");
@@ -1981,6 +2080,10 @@ void DrawPersistentFinalEquityCurve()
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   RESET_BUTTON_NAME=PREFIX+"UI_RESET_PROTECTION";
+   TRACKER_BUTTON_NAME=PREFIX+"UI_TRACKER_TOGGLE";
+   if(GlobalVariableCheck(ProtectionResetKey()))gProtectionResetTime=(datetime)GlobalVariableGet(ProtectionResetKey());
+   if(gProtectionResetTime<StrToTime(TimeToString(TimeCurrent(),TIME_DATE))||gProtectionResetTime>TimeCurrent())gProtectionResetTime=0;
    // Remove stale UI objects from a previous preserved tester run, then create
    // the current layout once with the latest responsive geometry.
    DeletePanelObjects();
@@ -2038,6 +2141,15 @@ void OnTimer()
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
 {
+   if(id==CHARTEVENT_OBJECT_CLICK&&sparam==RESET_BUTTON_NAME)
+   {
+      gProtectionResetTime=TimeCurrent();GlobalVariableSet(ProtectionResetKey(),(double)gProtectionResetTime);
+      gLastAction="LOSS PROTECTION RESET";ObjectSetInteger(0,sparam,OBJPROP_STATE,false);DeletePanelObjects();UpdateDashboard();return;
+   }
+   if(id==CHARTEVENT_OBJECT_CLICK&&sparam==TRACKER_BUTTON_NAME)
+   {
+      gShowProfitTracker=!gShowProfitTracker;ObjectSetInteger(0,sparam,OBJPROP_STATE,false);DeletePanelObjects();UpdateDashboard();return;
+   }
    if(id==CHARTEVENT_OBJECT_CLICK && sparam==FILTER_BUTTON_NAME)
    {
       gShowEnabledOnly=!gShowEnabledOnly;
