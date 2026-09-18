@@ -1985,25 +1985,25 @@ void UpdateOption13Dashboard()
    for(int tick=0;tick<=10;tick++)
    {
       int tickY=meterY+meterH-6-(int)MathRound((meterH-12)*tick/10.0);
-      UILabel("O13_SCORE_T"+IntegerToString(tick),leftX+296,tickY,IntegerToString(tick*10),SecondaryTextColor,PanelFontSize-2);
+      UILabel("O13_SCORE_T"+IntegerToString(tick),leftX+301,tickY,IntegerToString(tick*10),SecondaryTextColor,PanelFontSize-2);
    }
-   UIRect("O13_SCORE_BADGE",leftX+260,topY+283,30,25,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_SCORE_BADGE",OBJPROP_BORDER_TYPE,BORDER_RAISED);
-   UILabel("O13_SCORE_NUMBER",leftX+265,topY+288,DoubleToString(scorePercent,0),TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UIRect("O13_SCORE_BADGE",leftX+268,topY+283,30,25,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_SCORE_BADGE",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   int roundedScore=(int)MathRound(scorePercent);int scoreTextX=roundedScore>=100?274:(roundedScore>=10?277:280);
+   UILabel("O13_SCORE_NUMBER",leftX+scoreTextX,topY+288,IntegerToString(roundedScore),TextColor,ValueFontSize+1,"Segoe UI Semibold");
 
    // All technical indicators receive live closed-bar values normalized to
    // 0..100. The three principal gauges use those same values.
    double indicatorPercent[];GetIndicatorPercentages(1,indicatorPercent);
    double rsi=indicatorPercent[1],macdPercent=indicatorPercent[2];
    double qualityPercent=Percent0To100(gCandleScore/5.0*100.0);
-   UpdateOption13NeonGauge("RSI",leftX+340,topY+65,rsi);
-   UpdateOption13NeonGauge("MACD",leftX+340,topY+150,macdPercent);
-   UpdateOption13NeonGauge("QUALITY",leftX+340,topY+235,qualityPercent);
-   UIRect("O13_RSI_HEAD",leftX+346,topY+55,56,14,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_RSI_HEAD",OBJPROP_BORDER_TYPE,BORDER_RAISED);
-   UIRect("O13_MACD_HEAD",leftX+346,topY+140,56,14,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_MACD_HEAD",OBJPROP_BORDER_TYPE,BORDER_RAISED);
-   UIRect("O13_QUALITY_HEAD",leftX+337,topY+225,74,14,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_QUALITY_HEAD",OBJPROP_BORDER_TYPE,BORDER_RAISED);
-   UILabel("O13_RSI_L",leftX+365,topY+56,"RSI",TextColor,PanelFontSize-1,"Segoe UI Semibold");UILabel("O13_RSI_V",leftX+359,topY+91,DoubleToString(rsi,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
-   UILabel("O13_MACD_L",leftX+357,topY+141,"MACD",TextColor,PanelFontSize-1,"Segoe UI Semibold");UILabel("O13_MACD_V",leftX+355,topY+176,DoubleToString(macdPercent,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
-   UILabel("O13_QUALITY_L",leftX+341,topY+226,"SIGNAL QUALITY",TextColor,PanelFontSize-2,"Segoe UI Semibold");UILabel("O13_QUALITY_V",leftX+357,topY+261,DoubleToString(qualityPercent,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   // Keep each runtime arc exactly concentric with its painted recess. Labels
+   // occupy the clear inter-gauge gaps rather than covering or shifting rings.
+   UpdateOption13NeonGauge("RSI",leftX+331,topY+61,rsi);
+   UpdateOption13NeonGauge("MACD",leftX+331,topY+146,macdPercent);
+   UpdateOption13NeonGauge("QUALITY",leftX+331,topY+231,qualityPercent);
+   UILabel("O13_RSI_L",leftX+356,topY+51,"RSI",TextColor,PanelFontSize-2,"Segoe UI Semibold");UILabel("O13_RSI_V",leftX+352,topY+87,DoubleToString(rsi,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UILabel("O13_MACD_L",leftX+349,topY+136,"MACD",TextColor,PanelFontSize-2,"Segoe UI Semibold");UILabel("O13_MACD_V",leftX+352,topY+172,DoubleToString(macdPercent,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
+   UILabel("O13_QUALITY_L",leftX+330,topY+221,"SIGNAL QUALITY",TextColor,PanelFontSize-2,"Segoe UI Semibold");UILabel("O13_QUALITY_V",leftX+352,topY+257,DoubleToString(qualityPercent,0)+"%",TextColor,ValueFontSize+1,"Segoe UI Semibold");
 
    int type=-1,ticket=ActiveTicket(type);double entry=0,sl=0,tp=0,lots=0,profit=0;
    if(ticket>0&&OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES)){entry=OrderOpenPrice();sl=OrderStopLoss();tp=OrderTakeProfit();lots=OrderLots();profit=OrderProfit()+OrderSwap()+OrderCommission();}
