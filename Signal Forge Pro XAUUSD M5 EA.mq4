@@ -1923,6 +1923,36 @@ double EnabledWeightTotal()
    return MathMax(1,total);
 }
 
+double Percent0To100(double value)
+{
+   return MathMax(0.0,MathMin(100.0,value));
+}
+
+void GetIndicatorPercentages(int shift,double &values[])
+{
+   ArrayResize(values,11);ArrayInitialize(values,50.0);
+   double atr=iATR(NULL,0,MathMax(1,ATRLength),shift);if(atr<=0)atr=MathMax(Point,High[shift]-Low[shift]);
+   double smaFast=iMA(NULL,0,MathMax(1,SMAFastLength),0,MODE_SMA,PRICE_CLOSE,shift);
+   double smaSlow=iMA(NULL,0,MathMax(1,SMASlowLength),0,MODE_SMA,PRICE_CLOSE,shift);
+   values[0]=Percent0To100(50.0+50.0*(smaFast-smaSlow)/atr);
+   values[1]=Percent0To100(iRSI(NULL,0,MathMax(1,RSILength),PRICE_CLOSE,shift));
+   double macdMain=iMACD(NULL,0,MACDFastLength,MACDSlowLength,MACDSignalLength,PRICE_CLOSE,MODE_MAIN,shift);
+   double macdSignal=iMACD(NULL,0,MACDFastLength,MACDSlowLength,MACDSignalLength,PRICE_CLOSE,MODE_SIGNAL,shift);
+   values[2]=Percent0To100(50.0+50.0*(macdMain-macdSignal)/atr);
+   int stDirection=SupertrendDirection(shift);values[3]=stDirection==-1?100.0:(stDirection==1?0.0:50.0);
+   values[4]=Percent0To100(iStochastic(NULL,0,StochasticKLength,StochasticDLength,StochasticSmooth,MODE_SMA,0,MODE_MAIN,shift));
+   double bandUpper=iBands(NULL,0,MathMax(1,BollingerLength),2.0,0,PRICE_CLOSE,MODE_UPPER,shift);
+   double bandLower=iBands(NULL,0,MathMax(1,BollingerLength),2.0,0,PRICE_CLOSE,MODE_LOWER,shift);
+   values[5]=bandUpper>bandLower?Percent0To100(100.0*(Close[shift]-bandLower)/(bandUpper-bandLower)):50.0;
+   double emaFast=iMA(NULL,0,MathMax(1,EMAFastLength),0,MODE_EMA,PRICE_CLOSE,shift);
+   double emaSlow=iMA(NULL,0,MathMax(1,EMASlowLength),0,MODE_EMA,PRICE_CLOSE,shift);
+   values[6]=Percent0To100(50.0+50.0*(emaFast-emaSlow)/atr);
+   values[7]=Percent0To100(50.0+50.0*iAO(NULL,0,shift)/atr);
+   double sar=iSAR(NULL,0,SARStep,SARMaximum,shift);values[8]=Percent0To100(50.0+50.0*(Close[shift]-sar)/atr);
+   double cci=iCCI(NULL,0,MathMax(1,CCILength),PRICE_CLOSE,shift);values[9]=Percent0To100(50.0+cci/4.0);
+   values[10]=Percent0To100(iADX(NULL,0,MathMax(1,ADXPeriod),PRICE_CLOSE,MODE_MAIN,shift));
+}
+
 string UIDuration(datetime opened)
 {
    if(opened<=0)return "--:--:--";int seconds=(int)MathMax(0,TimeCurrent()-opened);
@@ -1938,31 +1968,30 @@ void UpdateOption13Dashboard()
    UIBitmap("O13_ACCOUNT_PANEL",rightX,topY,"::Images\\SignalForgePro13\\panel_account.bmp");
    UIBitmap("O13_ACTIVE_PANEL",rightX,activeY,"::Images\\SignalForgePro13\\panel_active.bmp");
 
-   UILabel("O13_SIGNAL_TITLE",leftX+152,topY+19,"SIGNAL MODULE",TextColor,PanelFontSize+2,"Segoe UI Semibold");
+   UILabel("O13_SIGNAL_TITLE",leftX+152,topY+19,"SIGNAL MODULE",AccentColor,PanelFontSize+2,"Segoe UI Semibold");
    string state=gLongSignal?"BUY":(gShortSignal?"SELL":"WAIT");color stateColor=gLongSignal?ProfitColor:(gShortSignal?LossColor:AccentColor);
+   double scorePercent=Percent0To100(MathMax(gBuyScore,gSellScore)/EnabledWeightTotal()*100.0);
    UILabel("O13_STATE",leftX+104,topY+151,state,stateColor,ValueFontSize+8,"Segoe UI Semibold");
-   UILabel("O13_STRENGTH",leftX+106,topY+184,"Strength "+DoubleToString(MathMax(gBuyScore,gSellScore),1),SecondaryTextColor,PanelFontSize);
-   // Vertical score meter: 0..10 scale on the right and live value below.
-   double score10=MathMax(gBuyScore,gSellScore)/EnabledWeightTotal()*10.0;
-   score10=MathMax(0,MathMin(10,score10));int meterX=leftX+276,meterY=topY+83,meterH=198;
+   UILabel("O13_STRENGTH",leftX+103,topY+184,"Strength "+DoubleToString(scorePercent,0)+"%",SecondaryTextColor,PanelFontSize);
+   // Vertical score meter: the live weighted signal score is normalized 0..100.
+   int meterX=leftX+276,meterY=topY+83,meterH=198;
    UIRect("O13_SCORE_TRACK",meterX,meterY,14,meterH,C'4,17,29',C'48,85,105');ObjectSetInteger(0,PREFIX+"UI_O13_SCORE_TRACK",OBJPROP_BORDER_TYPE,BORDER_RAISED);
-   int meterFill=(int)MathRound((meterH-4)*score10/10.0);
+   int meterFill=(int)MathRound((meterH-4)*scorePercent/100.0);
    UIRect("O13_SCORE_FILL",meterX+3,meterY+meterH-2-meterFill,8,meterFill,C'0,220,230',C'105,255,255');ObjectSetInteger(0,PREFIX+"UI_O13_SCORE_FILL",OBJPROP_BORDER_TYPE,BORDER_RAISED);
    UILabel("O13_SCORE_LABEL",leftX+264,topY+61,"SCORE",TextColor,PanelFontSize,"Segoe UI Semibold");
    for(int tick=0;tick<=10;tick++)
    {
       int tickY=meterY+meterH-6-(int)MathRound((meterH-12)*tick/10.0);
-      UILabel("O13_SCORE_T"+IntegerToString(tick),leftX+296,tickY,IntegerToString(tick),SecondaryTextColor,PanelFontSize-2);
+      UILabel("O13_SCORE_T"+IntegerToString(tick),leftX+296,tickY,IntegerToString(tick*10),SecondaryTextColor,PanelFontSize-2);
    }
-   UILabel("O13_SCORE_NUMBER",leftX+270,topY+288,DoubleToString(score10,1),AccentColor,ValueFontSize+1,"Segoe UI Semibold");
+   UIRect("O13_SCORE_BADGE",leftX+262,topY+283,39,25,C'7,25,43',AccentColor);ObjectSetInteger(0,PREFIX+"UI_O13_SCORE_BADGE",OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   UILabel("O13_SCORE_NUMBER",leftX+269,topY+288,DoubleToString(scorePercent,0),TextColor,ValueFontSize+1,"Segoe UI Semibold");
 
-   // Real dynamic neon arcs. Each bitmap is regenerated when its percentage
-   // changes; these are not fixed painted-circle effects.
-   double rsi=iRSI(NULL,0,RSILength,PRICE_CLOSE,1);
-   double macd=iMACD(NULL,0,MACDFastLength,MACDSlowLength,MACDSignalLength,PRICE_CLOSE,MODE_MAIN,1);
-   double atrNow=iATR(NULL,0,MathMax(1,ATRLength),1);
-   double macdPercent=atrNow>0?MathMin(100,MathAbs(macd)/atrNow*100.0):0;
-   double qualityPercent=MathMax(0,MathMin(100,gCandleScore/5.0*100.0));
+   // All technical indicators receive live closed-bar values normalized to
+   // 0..100. The three principal gauges use those same values.
+   double indicatorPercent[];GetIndicatorPercentages(1,indicatorPercent);
+   double rsi=indicatorPercent[1],macdPercent=indicatorPercent[2];
+   double qualityPercent=Percent0To100(gCandleScore/5.0*100.0);
    UpdateOption13NeonGauge("RSI",leftX+331,topY+61,rsi);
    UpdateOption13NeonGauge("MACD",leftX+331,topY+146,macdPercent);
    UpdateOption13NeonGauge("QUALITY",leftX+331,topY+231,qualityPercent);
@@ -1972,7 +2001,8 @@ void UpdateOption13Dashboard()
 
    int type=-1,ticket=ActiveTicket(type);double entry=0,sl=0,tp=0,lots=0,profit=0;
    if(ticket>0&&OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES)){entry=OrderOpenPrice();sl=OrderStopLoss();tp=OrderTakeProfit();lots=OrderLots();profit=OrderProfit()+OrderSwap()+OrderCommission();}
-   UILabel("O13_ENTRY_L",leftX+35,topY+326,"Entry:",TextColor,PanelFontSize);UILabel("O13_ENTRY_V",leftX+92,topY+326,entry>0?DoubleToString(entry,Digits):"-",AccentColor,PanelFontSize+1);
+   string entryText=entry>0?DoubleToString(entry,Digits)+" "+(type==OP_BUY?"BUY":"SELL"):"-";
+   UILabel("O13_ENTRY_L",leftX+35,topY+326,"Entry:",TextColor,PanelFontSize);UILabel("O13_ENTRY_V",leftX+92,topY+326,entryText,AccentColor,PanelFontSize+1);
    UILabel("O13_SL_L",leftX+35,topY+344,"S/L:",TextColor,PanelFontSize);UILabel("O13_SL_V",leftX+92,topY+344,sl>0?DoubleToString(sl,Digits):"-",LossColor,PanelFontSize+1);
    UILabel("O13_TP_L",leftX+220,topY+344,"T/P:",TextColor,PanelFontSize);UILabel("O13_TP_V",leftX+275,topY+344,tp>0?DoubleToString(tp,Digits):"-",ProfitColor,PanelFontSize+1);
    UILabel("O13_COUNTDOWN",leftX+285,topY+326,"M5  "+CurrentCandleCountdown(),WarningColor,PanelFontSize+1,"Segoe UI Semibold");
@@ -1992,8 +2022,29 @@ void UpdateOption13Dashboard()
       string row[6];row[0]=type==OP_BUY?"BUY":"SELL";row[1]=Symbol();row[2]=DoubleToString(lots,2);row[3]=DoubleToString(entry,Digits);row[4]=DoubleToString(sl,Digits);row[5]=DoubleToString(tp,Digits);
       for(int c=0;c<6;c++)UILabel("O13_AR"+IntegerToString(c),rightX+hx[c],activeY+111,row[c],c==0?(type==OP_BUY?ProfitColor:LossColor):TextColor,PanelFontSize-1);
       UILabel("O13_PROFIT",rightX+230,activeY+143,"P/L "+SignedValue(profit,2),profit>=0?ProfitColor:LossColor,ValueFontSize+1,"Segoe UI Semibold");
+      UILabel("O13_WAIT",rightX+87,activeY+143,"",AccentColor,ValueFontSize+2,"Segoe UI Semibold");
    }
-   else UILabel("O13_WAIT",rightX+87,activeY+170,"WAITING FOR SIGNAL",AccentColor,ValueFontSize+2,"Segoe UI Semibold");
+   else
+   {
+      for(int emptyColumn=0;emptyColumn<6;emptyColumn++)UILabel("O13_AR"+IntegerToString(emptyColumn),rightX+hx[emptyColumn],activeY+111,"",TextColor,PanelFontSize-1);
+      UILabel("O13_PROFIT",rightX+230,activeY+143,"",TextColor,ValueFontSize+1,"Segoe UI Semibold");
+      UILabel("O13_WAIT",rightX+87,activeY+143,"WAITING FOR SIGNAL",AccentColor,ValueFontSize+2,"Segoe UI Semibold");
+   }
+
+   // Compact all-indicator monitor. Every displayed reading is a real closed-
+   // bar calculation normalized to the common 0..100 HUD scale.
+   string indicatorNames[11]={"SMA","RSI","MACD","SUPERTREND","STOCH","BOLLINGER","EMA","AO","SAR","CCI","ADX"};
+   UILabel("O13_IND_HEAD",rightX+24,activeY+180,"INDICATORS  0-100",AccentColor,PanelFontSize,"Segoe UI Semibold");
+   for(int indicator=0;indicator<11;indicator++)
+   {
+      int column=indicator/6,rowIndex=indicator%6;
+      int indicatorX=rightX+24+column*164,indicatorY=activeY+201+rowIndex*17;
+      color indicatorColor=indicatorPercent[indicator]>=55?ProfitColor:(indicatorPercent[indicator]<=45?LossColor:AccentColor);
+      UILabel("O13_IND_L"+IntegerToString(indicator),indicatorX,indicatorY,indicatorNames[indicator],SecondaryTextColor,PanelFontSize-2);
+      UIRect("O13_IND_T"+IntegerToString(indicator),indicatorX+67,indicatorY+4,34,6,C'5,20,34',C'30,69,91');
+      UIRect("O13_IND_F"+IntegerToString(indicator),indicatorX+68,indicatorY+5,(int)MathMax(1,32.0*indicatorPercent[indicator]/100.0),4,indicatorColor,indicatorColor);
+      UILabel("O13_IND_V"+IntegerToString(indicator),indicatorX+105,indicatorY,DoubleToString(indicatorPercent[indicator],0),indicatorColor,PanelFontSize-1,"Segoe UI Semibold");
+   }
    ChartRedraw(0);
 }
 
@@ -2045,6 +2096,7 @@ void UpdateDashboard()
    }
    UpdateTrackerCache();double profitFactor=gTrackerGrossLoss>0?gTrackerGrossProfit/gTrackerGrossLoss:(gTrackerGrossProfit>0?999:0);
    double winRate=gTrackerTrades>0?100.0*gTrackerWins/gTrackerTrades:0;
+   double allIndicatorPercent[];GetIndicatorPercentages(1,allIndicatorPercent);
 
    if(ShowLeftPanel)
    {
@@ -2067,7 +2119,7 @@ void UpdateDashboard()
       for(int m=0;m<8;m++){UILabel("LEFT_ML"+IntegerToString(m),mx,my,ml[m],SecondaryTextColor,PanelFontSize-1);color vc=(m==5?(mv[m]=="BULLISH"?ProfitColor:(mv[m]=="BEARISH"?LossColor:NeutralColor)):(m==6?(marketOpen?ProfitColor:LossColor):TextColor));UILabel("LEFT_MV"+IntegerToString(m),mx+marketW-78,my,mv[m],vc,PanelFontSize);my+=22;}
       int ix=leftX+36+scoreW+marketW,iy=cardY+14;UILabel("LEFT_IHEAD",ix,iy,"INDICATORS",TextColor,PanelFontSize,"Segoe UI Semibold");iy+=23;
       string indicatorNames[11]={"SMA","RSI","MACD","Supertrend","Stochastic","Bollinger","EMA","AO","SAR","CCI","ADX"};
-      for(int q=0;q<11;q++){string state=gBull[q]?"UP":(gBear[q]?"DOWN":"-");color stateColor=gBull[q]?ProfitColor:(gBear[q]?LossColor:NeutralColor);UILabel("LEFT_IN"+IntegerToString(q),ix,iy,indicatorNames[q],SecondaryTextColor,PanelFontSize-1);UILabel("LEFT_IS"+IntegerToString(q),ix+indicatorW-46,iy,state,stateColor,PanelFontSize-1,"Segoe UI Semibold");iy+=17;}
+      for(int q=0;q<11;q++){string state=DoubleToString(allIndicatorPercent[q],0);color stateColor=allIndicatorPercent[q]>=55?ProfitColor:(allIndicatorPercent[q]<=45?LossColor:AccentColor);UILabel("LEFT_IN"+IntegerToString(q),ix,iy,indicatorNames[q],SecondaryTextColor,PanelFontSize-1);UILabel("LEFT_IS"+IntegerToString(q),ix+indicatorW-46,iy,state,stateColor,PanelFontSize-1,"Segoe UI Semibold");iy+=17;}
       int stateY=leftY+leftH-66;string signalCard=PREFIX+"UI_LEFT_STATECARD";
       color signalBg=gLongSignal?C'0,112,72':(gShortSignal?C'156,28,45':C'10,25,49');
       color signalBorder=gLongSignal?ProfitColor:(gShortSignal?LossColor:C'21,82,145');
