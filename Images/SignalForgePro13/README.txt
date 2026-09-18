@@ -20,3 +20,5 @@ FILES
 - panel_active.bmp: complete 345x320 Active Position skin
 
 UseOption13SapphireBitmapSkin=true enables the complete Option 13 layout. Dynamic labels and values are overlaid with native OBJ_LABEL objects. The Signal Module includes a live vertical 0-100 score meter and three runtime-generated neon circular percentage gauges for RSI, MACD and Signal Quality. Their illuminated arcs are rebuilt as the percentages change; they are not fixed painted effects. The Active Position module uses solid raised native MQL4 cards and separators (no painted grid) and also shows live 0-100 normalized closed-bar readings for all eleven signal indicators: SMA, RSI, MACD, Supertrend, Stochastic, Bollinger, EMA, AO, SAR, CCI and ADX. Set the option false to use the responsive native-object fallback UI.
+
+The enabled EMA 200 regime filter requires the entire closed signal candle above EMA 200 for BUY or below EMA 200 for SELL. EMA 200 is drawn on the chart with a solid raised EMA200 endpoint card that follows the live line as price, scale, or chart position changes.

@@ -123,6 +123,15 @@ input int  BollingerLength = 20;
 input bool EnableEMA = true;
 input int  EMAFastLength = 9;
 input int  EMASlowLength = 21;
+//--- Long-term directional regime filter (closed candle, non-repainting)
+input bool EnableEMA200TrendFilter = true;
+input int  EMA200Period = 200;
+input bool DrawEMA200OnChart = true;
+input int  EMA200LineWidth = 2;
+input color EMA200LineColor = C'0,229,255';
+input color EMA200CardBackground = C'11,26,48';
+input color EMA200CardBorder = C'0,229,255';
+input color EMA200CardText = C'245,247,250';
 input bool EnableAO = true;
 input bool EnableSAR = true;
 input double SARStep = 0.02;
@@ -442,6 +451,55 @@ void PlotFilterSegment(int filter,int line,int shift,double olderValue,double ne
    ObjectSetInteger(0,name,OBJPROP_ZORDER,1);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
 }
 
+void PlotEMA200Segment(int shift)
+{
+   if(shift<0||shift+1>=Bars)return;
+   int period=(int)MathMax(2,EMA200Period);
+   double older=iMA(NULL,0,period,0,MODE_EMA,PRICE_CLOSE,shift+1);
+   double newer=iMA(NULL,0,period,0,MODE_EMA,PRICE_CLOSE,shift);
+   string name=PREFIX+"EMA200_LINE_"+IntegerToString(shift);
+   if(ObjectFind(0,name)<0)ObjectCreate(0,name,OBJ_TREND,0,Time[shift+1],older,Time[shift],newer);
+   ObjectMove(0,name,0,Time[shift+1],older);ObjectMove(0,name,1,Time[shift],newer);
+   ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,false);ObjectSetInteger(0,name,OBJPROP_COLOR,EMA200LineColor);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,(int)MathMax(1,EMA200LineWidth));ObjectSetInteger(0,name,OBJPROP_BACK,true);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,1);ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+}
+
+void UpdateEMA200Endpoint()
+{
+   string card=PREFIX+"EMA200_CARD",text=PREFIX+"EMA200_TEXT";
+   if(!DrawEMA200OnChart||Bars<MathMax(3,EMA200Period+2))
+   {
+      ObjectsDeleteAll(0,PREFIX+"EMA200_LINE_");ObjectDelete(0,card);ObjectDelete(0,text);return;
+   }
+   PlotEMA200Segment(0);
+   int period=(int)MathMax(2,EMA200Period);
+   double ema200=iMA(NULL,0,period,0,MODE_EMA,PRICE_CLOSE,0);int endpointX=0,endpointY=0;
+   if(!ChartTimePriceToXY(0,0,Time[0],ema200,endpointX,endpointY)){ObjectDelete(0,card);ObjectDelete(0,text);return;}
+   long chartWidth=0;ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartWidth);
+   int cardWidth=68,cardHeight=22,cardX=endpointX+8,cardY=endpointY-cardHeight/2;
+   if(cardX+cardWidth>(int)chartWidth-4)cardX=endpointX-cardWidth-8;
+   cardX=(int)MathMax(2,cardX);cardY=(int)MathMax(2,cardY);
+   if(ObjectFind(0,card)<0)ObjectCreate(0,card,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,card,OBJPROP_CORNER,CORNER_LEFT_UPPER);ObjectSetInteger(0,card,OBJPROP_XDISTANCE,cardX);ObjectSetInteger(0,card,OBJPROP_YDISTANCE,cardY);
+   ObjectSetInteger(0,card,OBJPROP_XSIZE,cardWidth);ObjectSetInteger(0,card,OBJPROP_YSIZE,cardHeight);ObjectSetInteger(0,card,OBJPROP_BGCOLOR,EMA200CardBackground);
+   ObjectSetInteger(0,card,OBJPROP_COLOR,EMA200CardBorder);ObjectSetInteger(0,card,OBJPROP_BORDER_TYPE,BORDER_RAISED);ObjectSetInteger(0,card,OBJPROP_BACK,false);
+   ObjectSetInteger(0,card,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,card,OBJPROP_HIDDEN,true);ObjectSetInteger(0,card,OBJPROP_ZORDER,4);
+   if(ObjectFind(0,text)<0)ObjectCreate(0,text,OBJ_LABEL,0,0,0);
+   ObjectSetInteger(0,text,OBJPROP_CORNER,CORNER_LEFT_UPPER);ObjectSetInteger(0,text,OBJPROP_XDISTANCE,cardX+9);ObjectSetInteger(0,text,OBJPROP_YDISTANCE,cardY+4);
+   ObjectSetString(0,text,OBJPROP_TEXT,"EMA200");ObjectSetString(0,text,OBJPROP_FONT,"Segoe UI Semibold");ObjectSetInteger(0,text,OBJPROP_FONTSIZE,8);
+   ObjectSetInteger(0,text,OBJPROP_COLOR,EMA200CardText);ObjectSetInteger(0,text,OBJPROP_BACK,false);ObjectSetInteger(0,text,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,text,OBJPROP_HIDDEN,true);ObjectSetInteger(0,text,OBJPROP_ZORDER,5);
+}
+
+void DrawEMA200History()
+{
+   ObjectsDeleteAll(0,PREFIX+"EMA200_LINE_");
+   if(!DrawEMA200OnChart||Bars<MathMax(3,EMA200Period+2)){UpdateEMA200Endpoint();return;}
+   int bars=(int)MathMax(10,MathMin(FilterDrawingBars,Bars-3));
+   for(int shift=bars;shift>=0;shift--)PlotEMA200Segment(shift);
+   UpdateEMA200Endpoint();
+}
+
 double OscillatorValue(int filter,int line,int shift)
 {
    if(filter==1)return iRSI(NULL,0,RSILength,PRICE_CLOSE,shift);
@@ -523,6 +581,9 @@ void UpdateFilterChartDrawings()
          }
       }
    }
+   // EMA 200 is the one explicit additional chart study requested alongside
+   // Supertrend; all other technical drawings remain suppressed.
+   DrawEMA200History();
 }
 
 void CreateSignalOrbResource(bool buy)
@@ -670,7 +731,7 @@ void DrawHistoricalSignalOrbs()
    for(int shift=maximum;shift>=1;shift--)
    {
       bool bull[11],bear[11];HistoricalConditions(shift,dirs[shift],bull,bear);
-      bool lng=false,sht=false;CombinedSignal(bull,bear,lng,sht);int direction=lng?1:(sht?-1:0);
+      bool lng=false,sht=false;CombinedSignal(bull,bear,lng,sht);ApplyEMA200TrendFilter(shift,lng,sht);int direction=lng?1:(sht?-1:0);
       if(direction==0)continue;
       int candle=CandleConfirmationScore(shift,direction);
       if(UseCandleConfirmation&&candle<MinimumCandleScore)continue;
@@ -801,6 +862,17 @@ void CombinedSignal(bool &bull[],bool &bear[],bool &lng,bool &sht)
    }
    lng=UseSignalScore&&gBuyScore>=MinimumSignalScore&&gBuyScore>gSellScore;
    sht=UseSignalScore&&gSellScore>=MinimumSignalScore&&gSellScore>gBuyScore;
+}
+
+void ApplyEMA200TrendFilter(int shift,bool &lng,bool &sht)
+{
+   if(!EnableEMA200TrendFilter)return;
+   int period=(int)MathMax(2,EMA200Period);
+   double ema200=iMA(NULL,0,period,0,MODE_EMA,PRICE_CLOSE,shift);
+   // The complete closed signal candle must be on the permitted side. This
+   // is stricter than checking Close only and remains non-repainting.
+   if(lng&&Low[shift]<=ema200)lng=false;
+   if(sht&&High[shift]>=ema200)sht=false;
 }
 
 bool VolumeConfirmation(int shift)
@@ -2360,6 +2432,7 @@ void OnDeinit(const int reason)
 
 void OnTimer()
 {
+   if(!IsTesting()||IsVisualMode())UpdateEMA200Endpoint();
    DrawTradeLines();
    // Live charts advance continuously; force screen cards to follow their
    // time/price anchors even when order history has not changed.
@@ -2416,15 +2489,17 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
       }
       else gChartLayoutDirty=true;
       UpdatePanelPositions();
+      UpdateEMA200Endpoint();
    }
 }
 
 void OnTick()
 {
+   if(!IsTesting()||IsVisualMode())UpdateEMA200Endpoint();
    ManageBreakEven();
    ManageTrailing();
    EnforceDailyLossClose();
-   if(Bars<100) return;
+   if(Bars<MathMax(100,EMA200Period+5)) return;
    bool allowGraphics=(!IsTesting() || IsVisualMode());
    bool historyChanged=(OrdersHistoryTotal()!=gKnownResultHistory);
    if(allowGraphics && historyChanged)
@@ -2481,6 +2556,7 @@ void OnTick()
    GlobalVariableSet(ProcessedSignalKey(),(double)signalCandleTime);
    GetConditions(shift,gBull,gBear);
    CombinedSignal(gBull,gBear,gLongSignal,gShortSignal);
+   ApplyEMA200TrendFilter(shift,gLongSignal,gShortSignal);
    int direction=gLongSignal?1:(gShortSignal?-1:0);
    gCandleScore=direction==0?0:CandleConfirmationScore(shift,direction);
    if(UseCandleConfirmation&&gCandleScore<MinimumCandleScore){gLongSignal=false;gShortSignal=false;}
